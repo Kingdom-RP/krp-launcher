@@ -1,0 +1,60 @@
+# Сборка и публикация релиза лаунчера + автообновление.
+#
+# По пушу тега vX.Y.Z: tauri-action собирает установщик (NSIS/MSI), ПОДПИСЫВАЕТ
+# его ключом обновлений, создаёт GitHub Release и заливает артефакты + latest.json.
+# Лаунчер у игроков проверяет endpoint
+#   https://github.com/Kingdom-RP/krp-launcher/releases/latest/download/latest.json
+# и обновляется сам.
+#
+# ОДНОРАЗОВАЯ НАСТРОЙКА:
+#   1. Сгенерировать ключ подписи (локально, ОДИН раз):
+#        npm run tauri signer generate -- -w %USERPROFILE%\.tauri\krp.key
+#      Публичный ключ (из вывода / файла .key.pub) вставить в
+#      src-tauri/tauri.conf.json → plugins.updater.pubkey.
+#   2. В репозитории Settings → Secrets and variables → Actions добавить:
+#        TAURI_SIGNING_PRIVATE_KEY           = содержимое файла krp.key
+#        TAURI_SIGNING_PRIVATE_KEY_PASSWORD  = пароль ключа (пустой, если без пароля)
+#   3. Версию поднимать в src-tauri/tauri.conf.json (`version`) и тегать так же:
+#        git tag v0.1.1 && git push --tags
+#   ВАЖНО: приватный ключ НЕЛЬЗЯ терять и НЕЛЬЗЯ коммитить — без него обновления
+#   перестанут проходить проверку подписи у уже установленных лаунчеров.
+
+name: Release launcher
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install frontend deps
+        run: npm ci
+
+      - name: Build, sign & release
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          tagName: ${{ github.ref_name }}
+          releaseName: "Kingdom RP Launcher ${{ github.ref_name }}"
+          releaseBody: "Обновление лаунчера установится автоматически."
+          releaseDraft: false
+          prerelease: false

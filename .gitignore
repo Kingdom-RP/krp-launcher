@@ -31,3 +31,8 @@ build-work
 
 # Claude local settings (CLAUDE.md остаётся в репозитории)
 .claude/settings.local.json
+
+# Ключи подписи обновлений Tauri — НИКОГДА не коммитить
+*.key
+*.key.pub
+.tauri/

@@ -7,6 +7,7 @@ import {
   type PathValidation,
   type SyncProgress,
 } from "./lib/api";
+import { checkUpdate, installUpdate, type Update } from "./lib/updater";
 import "./App.css";
 
 type Phase = "idle" | "syncing" | "done" | "error";
@@ -29,6 +30,11 @@ function App() {
   const [pid, setPid] = useState<number | null>(null);
   const [errorMsg, setErrorMsg] = useState("");
 
+  // Автообновление лаунчера.
+  const [update, setUpdate] = useState<Update | null>(null);
+  const [updatingLauncher, setUpdatingLauncher] = useState(false);
+  const [updatePct, setUpdatePct] = useState(0);
+
   // Папка по умолчанию при старте.
   useEffect(() => {
     defaultInstallDir()
@@ -47,6 +53,27 @@ function App() {
       unlisten.then((fn) => fn());
     };
   }, []);
+
+  // Проверка обновления лаунчера при старте (молча игнорируем ошибки сети/конфига).
+  useEffect(() => {
+    checkUpdate()
+      .then((u) => setUpdate(u))
+      .catch(() => {});
+  }, []);
+
+  async function onUpdateLauncher() {
+    if (!update) return;
+    setUpdatingLauncher(true);
+    try {
+      await installUpdate(update, (downloaded, total) => {
+        if (total) setUpdatePct(Math.round((downloaded / total) * 100));
+      });
+      // После установки лаунчер перезапустится сам.
+    } catch (e) {
+      setErrorMsg(String(e));
+      setUpdatingLauncher(false);
+    }
+  }
 
   // Валидация при ручном вводе пути (с дебаунсом).
   const debounceRef = useRef<number | undefined>(undefined);
@@ -89,6 +116,21 @@ function App() {
 
   return (
     <div className="app">
+      {update && (
+        <div className="update-banner">
+          {updatingLauncher ? (
+            <span>Обновление лаунчера… {updatePct}%</span>
+          ) : (
+            <>
+              <span>🔄 Доступно обновление лаунчера: v{update.version}</span>
+              <button className="ghost small" onClick={onUpdateLauncher}>
+                Обновить
+              </button>
+            </>
+          )}
+        </div>
+      )}
+
       <header className="hero">
         <h1 className="title">KINGDOM&nbsp;RP</h1>
         <p className="subtitle">Minecraft 1.20.1 · NeoForge</p>

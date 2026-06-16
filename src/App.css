@@ -245,3 +245,21 @@ button:disabled {
   color: var(--text-dim);
   background: var(--bg-0);
 }
+
+/* Баннер обновления лаунчера */
+.update-banner {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 1rem;
+  padding: 0.5rem 1rem;
+  background: rgba(200, 162, 74, 0.14);
+  border-bottom: 1px solid rgba(200, 162, 74, 0.3);
+  font-size: 0.85rem;
+  color: var(--accent-hi);
+}
+
+.ghost.small {
+  padding: 0.25rem 0.7rem;
+  font-size: 0.8rem;
+}
