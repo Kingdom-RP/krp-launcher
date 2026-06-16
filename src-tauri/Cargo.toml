@@ -1,0 +1,39 @@
+[package]
+name = "krp-launcher"
+version = "0.1.0"
+description = "A Tauri App"
+authors = ["you"]
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[lib]
+# The `_lib` suffix may seem redundant but it is necessary
+# to make the lib name unique and wouldn't conflict with the bin name.
+# This seems to be only an issue on Windows, see https://github.com/rust-lang/cargo/issues/8519
+name = "krp_launcher_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-opener = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+reqwest = { version = "0.12", default-features = false, features = ["stream", "rustls-tls", "json"] }
+tokio = { version = "1", features = ["fs", "io-util", "rt"] }
+futures-util = "0.3"
+sha2 = "0.10"
+sha1 = "0.10"
+hex = "0.4"
+thiserror = "1"
+dirs = "5"
+# Только deflate — стандартное сжатие JRE-/mod-архивов. Без zstd/bzip2/lzma/aes
+# (они тянут C-зависимости и раздувают сборку).
+zip = { version = "2", default-features = false, features = ["deflate"] }
+
+[dev-dependencies]
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+

@@ -1,0 +1,36 @@
+{
+  "version": "1.0.0",
+  "minecraft": "1.20.1",
+  "neoforge": "47.1.106",
+  "java": {
+    "windows-x64": {
+      "url": "https://example.com/kingdomrp/java/OpenJDK17U-jre_x64_windows_hotspot_17.0.19_10.zip",
+      "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "size": 41943040,
+      "dir": "runtime"
+    }
+  },
+  "files": [
+    {
+      "path": "mods/kingdomrpcore-1.0.0.jar",
+      "url": "https://example.com/kingdomrp/mods/kingdomrpcore-1.0.0.jar",
+      "sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+      "size": 524288,
+      "kind": "mod"
+    },
+    {
+      "path": "config/kingdomrpcore-server.toml",
+      "url": "https://example.com/kingdomrp/config/kingdomrpcore-server.toml",
+      "sha256": "2222222222222222222222222222222222222222222222222222222222222222",
+      "size": 2048,
+      "kind": "config"
+    },
+    {
+      "path": "libraries/net/neoforged/neoforge/47.1.106/neoforge-47.1.106-universal.jar",
+      "url": "https://example.com/kingdomrp/libraries/net/neoforged/neoforge/47.1.106/neoforge-47.1.106-universal.jar",
+      "sha256": "3333333333333333333333333333333333333333333333333333333333333333",
+      "size": 2097152,
+      "kind": "library"
+    }
+  ]
+}

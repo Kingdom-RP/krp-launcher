@@ -1,0 +1,33 @@
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+node_modules
+dist
+dist-ssr
+*.local
+
+# Editor directories and files
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# Rust build artifacts крейта сборщика (src-tauri/target — в src-tauri/.gitignore)
+builder/target
+
+# Рабочая папка сборщика (выход NeoForge installer); его готовый выход — dist/ (уже игнорится)
+build-work
+
+# Claude local settings (CLAUDE.md остаётся в репозитории)
+.claude/settings.local.json

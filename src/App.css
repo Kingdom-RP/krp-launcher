@@ -1,0 +1,247 @@
+:root {
+  --bg-0: #0d0f1a;
+  --bg-1: #161a2b;
+  --bg-2: #1f2438;
+  --accent: #c8a24a;
+  --accent-hi: #e6c069;
+  --text: #e8eaf2;
+  --text-dim: #9aa0b4;
+  --error: #ff6b6b;
+  --warn: #ffcf6b;
+  --ok: #6bd98a;
+  font-family: "Segoe UI", system-ui, sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  margin: 0;
+  height: 100%;
+}
+
+body {
+  color: var(--text);
+  background:
+    radial-gradient(1200px 600px at 50% -10%, #2a2f4a 0%, transparent 60%),
+    linear-gradient(180deg, var(--bg-0), #07080f);
+  user-select: none;
+}
+
+.app {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  padding: 0;
+}
+
+/* Шапка */
+.hero {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+}
+
+.title {
+  margin: 0;
+  font-size: 3.2rem;
+  font-weight: 800;
+  letter-spacing: 0.15em;
+  background: linear-gradient(180deg, var(--accent-hi), var(--accent));
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  text-shadow: 0 2px 24px rgba(200, 162, 74, 0.25);
+}
+
+.subtitle {
+  margin: 0.4rem 0 0;
+  color: var(--text-dim);
+  letter-spacing: 0.08em;
+  font-size: 0.95rem;
+}
+
+/* Панель управления */
+.panel {
+  background: linear-gradient(180deg, rgba(31, 36, 56, 0.9), rgba(22, 26, 43, 0.95));
+  border-top: 1px solid rgba(200, 162, 74, 0.2);
+  padding: 1.2rem 1.6rem 1.4rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.7rem;
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+
+.path-row {
+  justify-content: space-between;
+}
+
+.path-info {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  min-width: 0;
+  flex: 1;
+}
+
+.label {
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--text-dim);
+}
+
+.path-value {
+  font-size: 0.95rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.path-input {
+  width: 100%;
+  background: var(--bg-0);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 6px;
+  color: var(--text);
+  padding: 0.5rem 0.6rem;
+  font-size: 0.9rem;
+  outline: none;
+}
+
+.path-input:focus {
+  border-color: var(--accent);
+}
+
+/* Сообщения */
+.msg {
+  margin: 0;
+  font-size: 0.85rem;
+  line-height: 1.35;
+  padding: 0.5rem 0.7rem;
+  border-radius: 6px;
+}
+
+.msg.error {
+  color: var(--error);
+  background: rgba(255, 107, 107, 0.08);
+}
+
+.msg.warn {
+  color: var(--warn);
+  background: rgba(255, 207, 107, 0.08);
+}
+
+.msg.ok {
+  color: var(--ok);
+  background: rgba(107, 217, 138, 0.08);
+}
+
+/* Прогресс */
+.progress-block {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.progress-line {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.82rem;
+  color: var(--text-dim);
+  gap: 1rem;
+}
+
+.file-name {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.bar {
+  height: 8px;
+  border-radius: 99px;
+  background: var(--bg-0);
+  overflow: hidden;
+}
+
+.bar-fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--accent), var(--accent-hi));
+  transition: width 0.15s ease;
+}
+
+.progress-meta {
+  font-size: 0.76rem;
+  color: var(--text-dim);
+}
+
+/* Кнопки */
+button {
+  cursor: pointer;
+  font-family: inherit;
+}
+
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.ghost {
+  background: transparent;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  color: var(--text);
+  border-radius: 6px;
+  padding: 0.45rem 0.9rem;
+  font-size: 0.85rem;
+  transition: border-color 0.15s, background 0.15s;
+}
+
+.ghost:not(:disabled):hover {
+  border-color: var(--accent);
+  background: rgba(200, 162, 74, 0.1);
+}
+
+.play {
+  margin-top: 0.4rem;
+  border: none;
+  border-radius: 8px;
+  padding: 0.85rem;
+  font-size: 1.05rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  color: #1a160a;
+  background: linear-gradient(180deg, var(--accent-hi), var(--accent));
+  box-shadow: 0 6px 20px rgba(200, 162, 74, 0.3);
+  transition: transform 0.1s, box-shadow 0.15s;
+}
+
+.play:not(:disabled):hover {
+  transform: translateY(-1px);
+  box-shadow: 0 8px 26px rgba(200, 162, 74, 0.45);
+}
+
+.play:not(:disabled):active {
+  transform: translateY(0);
+}
+
+/* Подвал */
+.footer {
+  display: flex;
+  justify-content: space-between;
+  padding: 0.5rem 1rem;
+  font-size: 0.72rem;
+  color: var(--text-dim);
+  background: var(--bg-0);
+}
