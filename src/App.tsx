@@ -2,12 +2,14 @@ import { useEffect, useRef, useState } from "react";
 import {
   defaultInstallDir,
   onSyncProgress,
+  openInstallDir,
   play,
   validateInstallPath,
   type PathValidation,
   type SyncProgress,
 } from "./lib/api";
 import { checkUpdate, installUpdate, type Update } from "./lib/updater";
+import { error as logError, info as logInfo } from "@tauri-apps/plugin-log";
 import "./App.css";
 
 type Phase = "idle" | "syncing" | "done" | "error";
@@ -90,6 +92,7 @@ function App() {
     setErrorMsg("");
     setPid(null);
     setProgress(null);
+    logInfo(`UI: нажата «Играть» (игрок=${playerName.trim()}, путь=${installDir})`);
     try {
       const launchedPid = await play(installDir, playerName.trim());
       setPid(launchedPid);
@@ -97,6 +100,16 @@ function App() {
     } catch (e) {
       setErrorMsg(String(e));
       setPhase("error");
+      logError(`UI: ошибка запуска: ${e}`);
+    }
+  }
+
+  async function onOpenFolder() {
+    try {
+      await openInstallDir(installDir);
+      logInfo(`UI: открыта папка установки ${installDir}`);
+    } catch (e) {
+      logError(`UI: не удалось открыть папку: ${e}`);
     }
   }
 
@@ -233,7 +246,17 @@ function App() {
 
       <footer className="footer">
         <span>Kingdom RP Launcher</span>
-        <span className="version">v0.1.0</span>
+        <div className="footer-right">
+          <span className="version">v0.1.0</span>
+          <button
+            className="folder-btn"
+            title="Открыть папку игры"
+            disabled={!installDir}
+            onClick={onOpenFolder}
+          >
+            📁
+          </button>
+        </div>
       </footer>
     </div>
   );

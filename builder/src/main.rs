@@ -140,34 +140,44 @@ fn main() -> Result<()> {
     fs::copy(&cfg.mod_jar, dist_mods.join(&mod_name))?;
     println!("мод: mods/{mod_name}");
 
-    // 4) JRE (Temurin 17) — снимок с Adoptium, хостим у себя с фикс. SHA-256.
+    // 4) JRE (Temurin 17) — снимки с Adoptium под каждую платформу, хостим у себя
+    // с фикс. SHA-256. Windows = .zip, Linux = .tar.gz.
     let mut java = BTreeMap::new();
     if !cfg.skip_jre {
-        let rel = "java/jre17-windows-x64.zip";
-        let dest = dist.join(rel.replace('/', std::path::MAIN_SEPARATOR_STR));
-        fs::create_dir_all(dest.parent().unwrap())?;
-        let url = "https://api.adoptium.net/v3/binary/latest/17/ga/windows/x64/jre/hotspot/normal/eclipse";
-        println!("скачиваю Temurin 17 JRE…");
-        let bytes = reqwest::blocking::Client::builder()
-            .build()?
-            .get(url)
-            .send()
-            .context("запрос JRE")?
-            .error_for_status()
-            .context("HTTP JRE")?
-            .bytes()?;
-        fs::write(&dest, &bytes)?;
-        let sha256 = sha256_file(&dest)?;
-        java.insert(
-            "windows-x64".to_string(),
-            JavaEntry {
-                url: format!("{}/{}", cfg.base_url.trim_end_matches('/'), rel),
-                sha256,
-                size: bytes.len() as u64,
-                dir: "runtime".to_string(),
-            },
-        );
-        println!("JRE: {rel} ({} МБ)", bytes.len() / 1024 / 1024);
+        // (ключ платформы, os, arch, расширение архива Adoptium)
+        let platforms = [
+            ("windows-x64", "windows", "x64", "zip"),
+            ("linux-x64", "linux", "x64", "tar.gz"),
+        ];
+        let http = reqwest::blocking::Client::builder().build()?;
+        for (key, os, arch, ext) in platforms {
+            let rel = format!("java/jre17-{key}.{ext}");
+            let dest = dist.join(rel.replace('/', std::path::MAIN_SEPARATOR_STR));
+            fs::create_dir_all(dest.parent().unwrap())?;
+            let url = format!(
+                "https://api.adoptium.net/v3/binary/latest/17/ga/{os}/{arch}/jre/hotspot/normal/eclipse"
+            );
+            println!("скачиваю Temurin 17 JRE ({key})…");
+            let bytes = http
+                .get(&url)
+                .send()
+                .context("запрос JRE")?
+                .error_for_status()
+                .context("HTTP JRE")?
+                .bytes()?;
+            fs::write(&dest, &bytes)?;
+            let sha256 = sha256_file(&dest)?;
+            java.insert(
+                key.to_string(),
+                JavaEntry {
+                    url: format!("{}/{}", cfg.base_url.trim_end_matches('/'), rel),
+                    sha256,
+                    size: bytes.len() as u64,
+                    dir: "runtime".to_string(),
+                },
+            );
+            println!("JRE: {rel} ({} МБ)", bytes.len() / 1024 / 1024);
+        }
     } else {
         println!("--skip-jre: java-entry в манифест не добавлен");
     }

@@ -144,6 +144,7 @@ pub async fn sync_manifest(
         }
     }
 
+    log::info!("sync: всего {total}, скачано {downloaded}, без изменений {skipped}");
     Ok(SyncSummary {
         total,
         downloaded,
@@ -160,8 +161,16 @@ pub async fn play(
     player_name: String,
 ) -> Result<u32> {
     let manifest = manifest::fetch_manifest(client, &config::manifest_url()).await?;
+    log::info!(
+        "play: манифест v{} (MC {}, NeoForge {}), файлов: {}",
+        manifest.version,
+        manifest.minecraft,
+        manifest.neoforge,
+        manifest.files.len()
+    );
 
     // 1. Ваниль с Mojang (client.jar + библиотеки + ассеты).
+    log::info!("play: [1/4] ваниль с Mojang ({})", config::MINECRAFT_VERSION);
     vanilla::ensure_vanilla(
         client,
         &install_dir,
@@ -182,6 +191,7 @@ pub async fn play(
     .await?;
 
     // 2. JRE из манифеста.
+    log::info!("play: [2/4] JRE ({})", java::platform_key());
     let entry = manifest.java.get(java::platform_key()).ok_or_else(|| {
         LauncherError::Other(format!(
             "в манифесте нет JRE для платформы {}",
@@ -203,9 +213,11 @@ pub async fn play(
     .await?;
 
     // 3. Файлы NeoForge + моды.
+    log::info!("play: [3/4] синхронизация файлов NeoForge + моды");
     sync_manifest(app, client, &install_dir, &manifest).await?;
 
     // 4. Запуск игры.
+    log::info!("play: [4/4] запуск игры");
     let profile = manifest
         .neoforge_profile
         .clone()

@@ -50,7 +50,9 @@ async fn ensure_java(
     client: tauri::State<'_, reqwest::Client>,
     install_dir: String,
 ) -> Result<Option<String>> {
-    install::ensure_java(&app, client.inner(), PathBuf::from(install_dir)).await
+    install::ensure_java(&app, client.inner(), PathBuf::from(install_dir))
+        .await
+        .inspect_err(|e| log::error!("ensure_java: ошибка: {e}"))
 }
 
 /// Обеспечить ванильные файлы Minecraft (client.jar, библиотеки, ассеты) с
@@ -61,7 +63,9 @@ async fn ensure_vanilla(
     client: tauri::State<'_, reqwest::Client>,
     install_dir: String,
 ) -> Result<()> {
-    install::ensure_vanilla(&app, client.inner(), PathBuf::from(install_dir)).await
+    install::ensure_vanilla(&app, client.inner(), PathBuf::from(install_dir))
+        .await
+        .inspect_err(|e| log::error!("ensure_vanilla: ошибка: {e}"))
 }
 
 /// Синхронизировать все файлы игры в указанную папку. Прогресс приходит во
@@ -72,7 +76,9 @@ async fn sync_files(
     client: tauri::State<'_, reqwest::Client>,
     install_dir: String,
 ) -> Result<SyncSummary> {
-    install::sync_files(&app, client.inner(), PathBuf::from(install_dir)).await
+    install::sync_files(&app, client.inner(), PathBuf::from(install_dir))
+        .await
+        .inspect_err(|e| log::error!("sync_files: ошибка: {e}"))
 }
 
 /// Полный цикл «Играть»: ваниль (Mojang) → JRE → файлы манифеста → запуск.
@@ -84,7 +90,11 @@ async fn play(
     install_dir: String,
     player_name: String,
 ) -> Result<u32> {
-    install::play(&app, client.inner(), PathBuf::from(install_dir), player_name).await
+    log::info!("play: установка и запуск для '{player_name}' в {install_dir}");
+    install::play(&app, client.inner(), PathBuf::from(install_dir), player_name)
+        .await
+        .inspect(|pid| log::info!("play: игра запущена, pid={pid}"))
+        .inspect_err(|e| log::error!("play: ошибка: {e}"))
 }
 
 /// Запустить игру (офлайн-режим). Возвращает PID процесса.
@@ -109,6 +119,18 @@ async fn launch_game(
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .plugin(
+            tauri_plugin_log::Builder::new()
+                .level(log::LevelFilter::Info)
+                .targets([
+                    tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::Stdout),
+                    tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::LogDir {
+                        file_name: Some("krp-launcher".into()),
+                    }),
+                    tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::Webview),
+                ])
+                .build(),
+        )
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())

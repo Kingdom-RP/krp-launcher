@@ -263,3 +263,25 @@ button:disabled {
   padding: 0.25rem 0.7rem;
   font-size: 0.8rem;
 }
+
+/* Футер: версия + кнопка-папка справа */
+.footer-right {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+.folder-btn {
+  background: transparent;
+  border: none;
+  font-size: 1.05rem;
+  line-height: 1;
+  padding: 0.15rem 0.3rem;
+  border-radius: 5px;
+  transition: transform 0.1s, background 0.15s;
+}
+
+.folder-btn:not(:disabled):hover {
+  background: rgba(255, 255, 255, 0.1);
+  transform: translateY(-1px);
+}

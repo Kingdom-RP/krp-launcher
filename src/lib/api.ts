@@ -3,6 +3,12 @@
 
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import { openPath } from "@tauri-apps/plugin-opener";
+
+/** Открыть папку установки игры в системном проводнике. */
+export function openInstallDir(path: string): Promise<void> {
+  return openPath(path);
+}
 
 /** Результат проверки пути установки (paths.rs::PathValidation). */
 export interface PathValidation {

@@ -11,10 +11,22 @@ use crate::download;
 use crate::error::{LauncherError, Result};
 use crate::manifest::JavaEntry;
 
-/// Ключ платформы для секции `java` манифеста.
-/// TODO: расширить при поддержке Linux/macOS.
+/// Ключ платформы для секции `java` манифеста (под текущую ОС/арх сборки).
+/// Сборки делаем x64 для Windows/Linux; macOS — задел (arm64/x64).
 pub fn platform_key() -> &'static str {
-    "windows-x64"
+    if cfg!(target_os = "windows") {
+        "windows-x64"
+    } else if cfg!(target_os = "macos") {
+        if cfg!(target_arch = "aarch64") {
+            "macos-arm64"
+        } else {
+            "macos-x64"
+        }
+    } else if cfg!(target_os = "linux") {
+        "linux-x64"
+    } else {
+        "unknown"
+    }
 }
 
 /// Путь к исполняемому файлу Java внутри распакованного runtime.
@@ -45,7 +57,13 @@ where
     }
 
     let runtime = install_dir.join(&entry.dir);
-    let archive = install_dir.join(format!("{}.download.zip", entry.dir));
+    // Adoptium: Windows = .zip, Linux/macOS = .tar.gz. Тип берём из имени файла.
+    let is_tgz = entry.url.ends_with(".tar.gz") || entry.url.ends_with(".tgz");
+    let archive = install_dir.join(format!(
+        "{}.download.{}",
+        entry.dir,
+        if is_tgz { "tar.gz" } else { "zip" }
+    ));
 
     download::download_to_file(client, &entry.url, &archive, on_progress).await?;
 
@@ -60,7 +78,11 @@ where
     }
 
     tokio::fs::create_dir_all(&runtime).await?;
-    extract_zip(&archive, &runtime, true).await?;
+    if is_tgz {
+        extract_targz(&archive, &runtime, true).await?;
+    } else {
+        extract_zip(&archive, &runtime, true).await?;
+    }
     let _ = tokio::fs::remove_file(&archive).await;
 
     if !java_exe.exists() {
@@ -117,6 +139,55 @@ fn extract_zip_blocking(archive: &Path, dest: &Path, strip_top: bool) -> Result<
             let mut out_file = std::fs::File::create(&out)?;
             std::io::copy(&mut entry, &mut out_file)?;
         }
+    }
+
+    Ok(())
+}
+
+/// Распаковать `.tar.gz` в `dest` (JRE под Linux/macOS). При `strip_top` срезает
+/// корневой каталог архива. `unpack` сохраняет права (важно для бита +x у `java`).
+pub async fn extract_targz(archive: &Path, dest: &Path, strip_top: bool) -> Result<()> {
+    let archive = archive.to_path_buf();
+    let dest = dest.to_path_buf();
+    tokio::task::spawn_blocking(move || extract_targz_blocking(&archive, &dest, strip_top))
+        .await
+        .map_err(|e| LauncherError::Other(format!("задача распаковки прервана: {e}")))?
+}
+
+fn extract_targz_blocking(archive: &Path, dest: &Path, strip_top: bool) -> Result<()> {
+    let file = std::fs::File::open(archive)?;
+    let gz = flate2::read::GzDecoder::new(file);
+    let mut tar = tar::Archive::new(gz);
+    tar.set_preserve_permissions(true);
+
+    for entry in tar.entries()? {
+        let mut entry = entry?;
+        let path = entry.path()?.into_owned();
+
+        let rel: PathBuf = if strip_top {
+            let mut comps = path.components();
+            comps.next(); // срезаем корневой каталог архива
+            comps.as_path().to_path_buf()
+        } else {
+            path
+        };
+
+        if rel.as_os_str().is_empty() {
+            continue;
+        }
+        // защита от выхода за пределы dest (tar-slip)
+        if rel
+            .components()
+            .any(|c| matches!(c, std::path::Component::ParentDir))
+        {
+            continue;
+        }
+
+        let out = dest.join(&rel);
+        if let Some(parent) = out.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        entry.unpack(&out)?;
     }
 
     Ok(())
