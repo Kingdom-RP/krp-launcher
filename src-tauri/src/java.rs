@@ -10,6 +10,7 @@ use std::path::{Path, PathBuf};
 use crate::download;
 use crate::error::{LauncherError, Result};
 use crate::manifest::JavaEntry;
+use crate::progress::Progress;
 
 /// Ключ платформы для секции `java` манифеста (под текущую ОС/арх сборки).
 /// Сборки делаем x64 для Windows/Linux; macOS — задел (arm64/x64).
@@ -29,6 +30,52 @@ pub fn platform_key() -> &'static str {
     }
 }
 
+/// Требуемая мажорная версия Java (проект на Java 17 — см. CLAUDE.md).
+pub const JAVA_MAJOR: u32 = 17;
+
+/// Достать мажорную версию Java из вывода `java -version` (Java печатает его в
+/// stderr), например `openjdk version "17.0.19"` → `17`. Понимает и старый
+/// формат `1.8.0` → `8`.
+fn parse_java_major(output: &str) -> Option<u32> {
+    let idx = output.find("version \"")?;
+    let rest = &output[idx + "version \"".len()..];
+    let end = rest.find('"')?;
+    let mut parts = rest[..end].split(['.', '_']);
+    let first: u32 = parts.next()?.parse().ok()?;
+    if first == 1 {
+        parts.next()?.parse().ok() // 1.8 → 8
+    } else {
+        Some(first)
+    }
+}
+
+/// Запустить `java -version` и вернуть мажорную версию (или `None`, если
+/// исполняемый файл битый/не запускается).
+fn java_major_version(java_exe: &Path) -> Option<u32> {
+    let output = std::process::Command::new(java_exe)
+        .arg("-version")
+        .output()
+        .ok()?;
+    // Версия обычно в stderr, но на всякий случай смотрим и stdout.
+    let text = format!(
+        "{}{}",
+        String::from_utf8_lossy(&output.stderr),
+        String::from_utf8_lossy(&output.stdout)
+    );
+    parse_java_major(&text)
+}
+
+/// Подходит ли установленная по пути JRE (существует и нужной мажорной версии).
+async fn java_is_valid(java_exe: &Path) -> bool {
+    if !java_exe.exists() {
+        return false;
+    }
+    let exe = java_exe.to_path_buf();
+    tokio::task::spawn_blocking(move || java_major_version(&exe) == Some(JAVA_MAJOR))
+        .await
+        .unwrap_or(false)
+}
+
 /// Путь к исполняемому файлу Java внутри распакованного runtime.
 pub fn java_exe_path(install_dir: &Path, runtime_dir: &str) -> PathBuf {
     let bin = install_dir.join(runtime_dir).join("bin");
@@ -39,24 +86,33 @@ pub fn java_exe_path(install_dir: &Path, runtime_dir: &str) -> PathBuf {
     }
 }
 
-/// Гарантировать наличие JRE. Если `java.exe` уже на месте — ничего не делает.
-/// Иначе качает архив (с прогрессом), проверяет SHA-256 и распаковывает.
-/// Возвращает путь к `java`-исполняемому.
-pub async fn ensure_java<F>(
+/// Гарантировать наличие JRE нужной версии. Если в `runtime` уже лежит рабочая
+/// Java [`JAVA_MAJOR`] — ничего не качает (учитывает размер как пропущенный).
+/// Если её нет или версия не та (битая/чужая) — перекачивает: качает архив (с
+/// прогрессом), проверяет SHA-256 и распаковывает. Возвращает путь к `java`.
+pub async fn ensure_java(
     client: &reqwest::Client,
     install_dir: &Path,
     entry: &JavaEntry,
-    on_progress: F,
-) -> Result<PathBuf>
-where
-    F: Fn(u64, Option<u64>),
-{
+    progress: &Progress,
+) -> Result<PathBuf> {
     let java_exe = java_exe_path(install_dir, &entry.dir);
-    if java_exe.exists() {
+    let runtime = install_dir.join(&entry.dir);
+
+    if java_is_valid(&java_exe).await {
+        progress.add_skipped(entry.size);
         return Ok(java_exe);
     }
+    // Папка есть, но Java битая/не та версия — сносим перед перекачкой.
+    if runtime.exists() {
+        log::warn!(
+            "ensure_java: JRE в {} отсутствует или не Java {JAVA_MAJOR} — перекачиваем",
+            runtime.display()
+        );
+        let _ = tokio::fs::remove_dir_all(&runtime).await;
+    }
 
-    let runtime = install_dir.join(&entry.dir);
+    progress.set_label("Устанавливаем Java");
     // Adoptium: Windows = .zip, Linux/macOS = .tar.gz. Тип берём из имени файла.
     let is_tgz = entry.url.ends_with(".tar.gz") || entry.url.ends_with(".tgz");
     let archive = install_dir.join(format!(
@@ -65,7 +121,7 @@ where
         if is_tgz { "tar.gz" } else { "zip" }
     ));
 
-    download::download_to_file(client, &entry.url, &archive, on_progress).await?;
+    download::download_to_file(client, &entry.url, &archive, progress.file_cb()).await?;
 
     let actual = download::sha256_file(&archive).await?;
     if !actual.eq_ignore_ascii_case(&entry.sha256) {

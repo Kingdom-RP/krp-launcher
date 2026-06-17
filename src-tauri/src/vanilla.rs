@@ -16,8 +16,10 @@ use std::path::Path;
 
 use serde::Deserialize;
 
+use crate::config;
 use crate::download;
 use crate::error::{LauncherError, Result};
+use crate::progress::Progress;
 
 const VERSION_MANIFEST_URL: &str =
     "https://piston-meta.mojang.com/mc/game/version_manifest_v2.json";
@@ -58,6 +60,8 @@ pub struct VersionDownloads {
 pub struct Download {
     pub url: String,
     pub sha1: String,
+    #[serde(default)]
+    pub size: u64,
 }
 
 #[derive(Debug, Deserialize)]
@@ -79,6 +83,8 @@ pub struct Artifact {
     pub path: String,
     pub url: String,
     pub sha1: String,
+    #[serde(default)]
+    pub size: u64,
 }
 
 #[derive(Debug, Deserialize)]
@@ -108,6 +114,8 @@ pub struct AssetIndex {
 #[derive(Debug, Deserialize)]
 pub struct AssetObject {
     pub hash: String,
+    #[serde(default)]
+    pub size: u64,
 }
 
 // ---- логика ----
@@ -172,17 +180,14 @@ pub async fn fetch_version_json(client: &reqwest::Client, url: &str) -> Result<V
 
 /// Полное обеспечение ванильных файлов для `version_id` в `install_dir`.
 ///
-/// `on_file(index, total, name, downloaded, total_bytes)` вызывается по ходу
-/// (для эмита прогресса наружу).
-pub async fn ensure_vanilla<F>(
+/// Считает общий объём ванили, добавляет его в общий трекер `progress` и качает
+/// недостающее, сообщая скачанные/пропущенные байты в трекер.
+pub async fn ensure_vanilla(
     client: &reqwest::Client,
     install_dir: &Path,
     version_id: &str,
-    on_file: F,
-) -> Result<()>
-where
-    F: Fn(usize, usize, &str, u64, Option<u64>),
-{
+    progress: &Progress,
+) -> Result<()> {
     let manifest = fetch_version_manifest(client).await?;
     let mv = manifest
         .versions
@@ -194,7 +199,7 @@ where
     let version = fetch_version_json(client, &mv.url).await?;
 
     // Сохраняем ванильный version JSON на диск — его читает построитель
-    // команды запуска (launch.rs) офлайн.
+    // команды запуска (launch.rs) офлайн. (Маленький, в трекере не учитываем.)
     let version_json_dest = install_dir
         .join("versions")
         .join(version_id)
@@ -206,7 +211,7 @@ where
         download::download_to_file(client, &mv.url, &version_json_dest, |_, _| {}).await?;
     }
 
-    // Индекс ассетов нужен заранее, чтобы знать общее число шагов.
+    // Индекс ассетов нужен заранее, чтобы знать размеры объектов.
     let asset_index: AssetIndex = client
         .get(&version.asset_index.url)
         .send()
@@ -221,24 +226,35 @@ where
         .filter(|l| library_allowed(&l.rules))
         .collect();
 
-    // total = client.jar + библиотеки + индекс ассетов + объекты ассетов
-    let total = 1 + libs.len() + 1 + asset_index.objects.len();
-    let mut idx = 0usize;
+    // Общий объём ванили = client.jar + библиотеки + объекты ассетов.
+    let mut vanilla_total = version.downloads.client.size;
+    for lib in &libs {
+        if let Some(a) = lib.downloads.as_ref().and_then(|d| d.artifact.as_ref()) {
+            vanilla_total += a.size;
+        }
+    }
+    for object in asset_index.objects.values() {
+        vanilla_total += object.size;
+    }
+    progress.add_total(vanilla_total);
+    progress.set_label(format!("Устанавливаем Minecraft {}", config::MINECRAFT_VERSION));
 
     // 1. client.jar
     let client_jar = install_dir
         .join("versions")
         .join(&version.id)
         .join(format!("{}.jar", version.id));
-    download::ensure_file_sha1(
+    let did = download::ensure_file_sha1(
         client,
         &version.downloads.client.url,
         &client_jar,
         &version.downloads.client.sha1,
-        |d, t| on_file(idx, total, "client.jar", d, t),
+        progress.file_cb(),
     )
     .await?;
-    idx += 1;
+    if !did {
+        progress.add_skipped(version.downloads.client.size);
+    }
 
     // 2. библиотеки
     for lib in &libs {
@@ -246,16 +262,16 @@ where
             let dest = install_dir
                 .join("libraries")
                 .join(artifact.path.replace('/', std::path::MAIN_SEPARATOR_STR));
-            let name = artifact.path.clone();
-            download::ensure_file_sha1(client, &artifact.url, &dest, &artifact.sha1, |d, t| {
-                on_file(idx, total, &name, d, t)
-            })
-            .await?;
+            let did =
+                download::ensure_file_sha1(client, &artifact.url, &dest, &artifact.sha1, progress.file_cb())
+                    .await?;
+            if !did {
+                progress.add_skipped(artifact.size);
+            }
         }
-        idx += 1;
     }
 
-    // 3. индекс ассетов (сохраняем на диск)
+    // 3. индекс ассетов (сохраняем на диск; маленький, в трекере не учитываем)
     let index_dest = install_dir
         .join("assets")
         .join("indexes")
@@ -265,10 +281,9 @@ where
         &version.asset_index.url,
         &index_dest,
         &version.asset_index.sha1,
-        |d, t| on_file(idx, total, "asset index", d, t),
+        |_, _| {},
     )
     .await?;
-    idx += 1;
 
     // 4. объекты ассетов
     for object in asset_index.objects.values() {
@@ -279,11 +294,11 @@ where
             .join(prefix)
             .join(&object.hash);
         let url = format!("{RESOURCES_BASE}/{prefix}/{}", object.hash);
-        download::ensure_file_sha1(client, &url, &dest, &object.hash, |d, t| {
-            on_file(idx, total, &object.hash, d, t)
-        })
-        .await?;
-        idx += 1;
+        let did =
+            download::ensure_file_sha1(client, &url, &dest, &object.hash, progress.file_cb()).await?;
+        if !did {
+            progress.add_skipped(object.size);
+        }
     }
 
     Ok(())

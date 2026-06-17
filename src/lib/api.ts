@@ -31,13 +31,16 @@ export interface PathValidation {
   warnings: string[];
 }
 
-/** Прогресс по текущему файлу (install.rs::SyncProgress). */
+/** Общий прогресс установки (progress.rs::ProgressPayload). */
 export interface SyncProgress {
-  index: number;
-  total: number;
-  file: string;
+  /** Что сейчас делаем, напр. «Устанавливаем Minecraft 1.20.1». */
+  label: string;
+  /** Скачано байт всего. */
   downloaded: number;
-  total_bytes: number | null;
+  /** Общий объём к скачиванию, байт. */
+  total: number;
+  /** Текущая скорость, байт/с. */
+  speed: number;
 }
 
 /** Итог синхронизации (install.rs::SyncSummary). */
@@ -65,6 +68,11 @@ export function setInstallDir(installDir: string): Promise<void> {
   return invoke<void>("set_install_dir", { installDir });
 }
 
+/** Привести выбранный каталог к папке установки (добавить «Kingdom RP»). */
+export function resolveInstallDir(picked: string): Promise<string> {
+  return invoke<string>("resolve_install_dir", { picked });
+}
+
 /** Удалить установленную игру (миры/настройки игрока сохраняются). */
 export function uninstallGame(installDir: string): Promise<void> {
   return invoke<void>("uninstall_game", { installDir });
@@ -88,6 +96,11 @@ export function isGameInstalled(installDir: string): Promise<boolean> {
 /** Синхронизировать файлы игры в указанную папку. */
 export function syncFiles(installDir: string): Promise<SyncSummary> {
   return invoke<SyncSummary>("sync_files", { installDir });
+}
+
+/** Установить игру без запуска: ваниль + JRE + файлы. */
+export function installGame(installDir: string): Promise<void> {
+  return invoke<void>("install_game", { installDir });
 }
 
 /** Полный цикл «Играть»: ваниль + JRE + файлы + запуск. Возвращает PID. */

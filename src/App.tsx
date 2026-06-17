@@ -2,11 +2,13 @@ import { useEffect, useState } from "react";
 import {
   confirmAction,
   getInstallDir,
+  installGame,
   isGameInstalled,
   onSyncProgress,
   openInstallDir,
   pickInstallDir,
   play,
+  resolveInstallDir,
   setInstallDir as persistInstallDir,
   uninstallGame,
   validateInstallPath,
@@ -14,6 +16,7 @@ import {
   type SyncProgress,
 } from "./lib/api";
 import { checkUpdate, installUpdate, type Update } from "./lib/updater";
+import { getVersion } from "@tauri-apps/api/app";
 import { error as logError, info as logInfo } from "@tauri-apps/plugin-log";
 import "./App.css";
 
@@ -47,6 +50,14 @@ function formatBytes(n: number): string {
   return `${(n / 1024 / 1024 / 1024).toFixed(2)} ГБ`;
 }
 
+/** Скорость: ≥1 МБ/с — в МБ/с, иначе в КБ/с. */
+function formatSpeed(bytesPerSec: number): string {
+  if (bytesPerSec >= 1024 * 1024) {
+    return `${(bytesPerSec / 1024 / 1024).toFixed(1)} МБ/с`;
+  }
+  return `${(bytesPerSec / 1024).toFixed(0)} КБ/с`;
+}
+
 function App() {
   const [installDir, setInstallDir] = useState("");
   const [installed, setInstalled] = useState(false);
@@ -57,6 +68,8 @@ function App() {
   const [progress, setProgress] = useState<SyncProgress | null>(null);
   const [pid, setPid] = useState<number | null>(null);
   const [errorMsg, setErrorMsg] = useState("");
+
+  const [version, setVersion] = useState("");
 
   // Автообновление лаунчера.
   const [update, setUpdate] = useState<Update | null>(null);
@@ -102,6 +115,11 @@ function App() {
       .catch(() => {});
   }, []);
 
+  // Версия лаунчера для футера (из tauri.conf.json).
+  useEffect(() => {
+    getVersion().then(setVersion).catch(() => {});
+  }, []);
+
   async function onUpdateLauncher() {
     if (!update) return;
     setUpdatingLauncher(true);
@@ -117,13 +135,15 @@ function App() {
   }
 
   // Выбор папки установки через системный диалог.
+  // К выбранному каталогу добавляем подпапку «Kingdom RP» (E:\Games → E:\Games\Kingdom RP).
   async function onChangePath() {
     try {
       const picked = await pickInstallDir(installDir);
       if (picked) {
-        await applyPath(picked);
-        persistInstallDir(picked).catch(() => {});
-        logInfo(`UI: выбрана папка установки ${picked}`);
+        const dir = await resolveInstallDir(picked);
+        await applyPath(dir);
+        persistInstallDir(dir).catch(() => {});
+        logInfo(`UI: выбрана папка установки ${dir}`);
       }
     } catch (e) {
       logError(`UI: ошибка выбора папки: ${e}`);
@@ -151,6 +171,26 @@ function App() {
     }
   }
 
+  // Установка (если игра ещё не установлена) — без запуска.
+  async function onInstall() {
+    setPhase("syncing");
+    setErrorMsg("");
+    setPid(null);
+    setProgress(null);
+    logInfo(`UI: нажата «Установить» (путь=${installDir})`);
+    try {
+      await installGame(installDir);
+      setInstalled(true);
+      setPhase("idle");
+      logInfo("UI: установка завершена");
+    } catch (e) {
+      setErrorMsg(String(e));
+      setPhase("error");
+      logError(`UI: ошибка установки: ${e}`);
+    }
+  }
+
+  // Запуск установленной игры (с докачкой обновлений).
   async function onPlay() {
     setPhase("syncing");
     setErrorMsg("");
@@ -161,7 +201,6 @@ function App() {
       const launchedPid = await play(installDir, playerName.trim());
       setPid(launchedPid);
       setPhase("done");
-      // После успешной установки/запуска кнопка должна стать «Играть».
       isGameInstalled(installDir).then(setInstalled).catch(() => {});
     } catch (e) {
       setErrorMsg(String(e));
@@ -179,21 +218,19 @@ function App() {
     }
   }
 
-  const canPlay =
+  const pathOk = (validation?.valid ?? false) && installDir.length > 0;
+  // До установки ник не нужен (поле скрыто), после — обязателен.
+  const canAct =
     phase !== "syncing" &&
-    (validation?.valid ?? false) &&
-    installDir.length > 0 &&
-    nickValid(playerName.trim());
+    pathOk &&
+    (!installed || nickValid(playerName.trim()));
 
   const nickMsg = nickError(playerName);
 
-  const fileProgress =
-    progress && progress.total_bytes
-      ? Math.round((progress.downloaded / progress.total_bytes) * 100)
-      : null;
-  const overallProgress = progress
-    ? Math.round(((progress.index + (fileProgress ?? 0) / 100) / progress.total) * 100)
-    : 0;
+  const overallProgress =
+    progress && progress.total > 0
+      ? Math.min(100, Math.round((progress.downloaded / progress.total) * 100))
+      : 0;
 
   return (
     <div className="app">
@@ -235,24 +272,26 @@ function App() {
           </button>
         </section>
 
-        {/* Никнейм */}
-        <section className="row">
-          <div className="path-info">
-            <span className="label">Никнейм</span>
-            <input
-              className="path-input"
-              value={playerName}
-              spellCheck={false}
-              maxLength={NICK_MAX}
-              placeholder="Латиница, цифры и _"
-              disabled={phase === "syncing"}
-              onChange={(e) => setPlayerName(e.currentTarget.value)}
-            />
-          </div>
-        </section>
+        {/* Никнейм — только после установки игры */}
+        {installed && (
+          <section className="row">
+            <div className="path-info">
+              <span className="label">Никнейм</span>
+              <input
+                className="path-input"
+                value={playerName}
+                spellCheck={false}
+                maxLength={NICK_MAX}
+                placeholder="Латиница, цифры и _"
+                disabled={phase === "syncing"}
+                onChange={(e) => setPlayerName(e.currentTarget.value)}
+              />
+            </div>
+          </section>
+        )}
 
         {/* Ошибка валидации ника */}
-        {nickMsg && <p className="msg error">⛔ {nickMsg}</p>}
+        {installed && nickMsg && <p className="msg error">⛔ {nickMsg}</p>}
 
         {/* Ошибки/предупреждения валидации пути */}
         {validation?.errors.map((msg) => (
@@ -266,14 +305,16 @@ function App() {
           </p>
         ))}
 
-        {/* Прогресс синхронизации */}
+        {/* Прогресс установки: общий объём + скорость */}
         {phase === "syncing" && (
           <section className="progress-block">
             <div className="progress-line">
-              <span className="file-name">{progress?.file ?? "Получение манифеста…"}</span>
-              {progress?.total_bytes != null && (
+              <span className="file-name">
+                {progress?.label || "Получение манифеста…"}
+              </span>
+              {progress && progress.total > 0 && (
                 <span className="file-size">
-                  {formatBytes(progress.downloaded)} / {formatBytes(progress.total_bytes)}
+                  {formatBytes(progress.downloaded)} / {formatBytes(progress.total)}
                 </span>
               )}
             </div>
@@ -281,9 +322,8 @@ function App() {
               <div className="bar-fill" style={{ width: `${overallProgress}%` }} />
             </div>
             <span className="progress-meta">
-              {progress ? `Файл ${progress.index + 1} из ${progress.total}` : "Старт…"}
-              {" · "}
               {overallProgress}%
+              {progress && progress.speed > 0 && ` · ${formatSpeed(progress.speed)}`}
             </span>
           </section>
         )}
@@ -300,8 +340,12 @@ function App() {
           <p className="msg error">⛔ {errorMsg}</p>
         )}
 
-        {/* Кнопка запуска: «Установить», пока игра не установлена, иначе «Играть» */}
-        <button className="play" disabled={!canPlay} onClick={onPlay}>
+        {/* Кнопка: «Установить», пока игра не установлена, иначе «Играть» */}
+        <button
+          className="play"
+          disabled={!canAct}
+          onClick={installed ? onPlay : onInstall}
+        >
           {phase === "syncing"
             ? installed
               ? "Запуск…"
@@ -315,7 +359,7 @@ function App() {
       <footer className="footer">
         <span>Kingdom RP Launcher</span>
         <div className="footer-right">
-          <span className="version">v0.1.0</span>
+          <span className="version">{version ? `v${version}` : ""}</span>
           {installed && (
             <button
               className="folder-btn"

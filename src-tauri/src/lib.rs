@@ -6,6 +6,7 @@ mod java;
 mod launch;
 mod manifest;
 mod paths;
+mod progress;
 mod settings;
 mod vanilla;
 
@@ -47,6 +48,14 @@ fn get_install_dir(app: tauri::AppHandle) -> Result<String> {
 #[tauri::command]
 fn set_install_dir(app: tauri::AppHandle, install_dir: String) -> Result<()> {
     settings::set_install_dir(&app, Some(install_dir))
+}
+
+/// Привести выбранный каталог к папке установки (добавить `Kingdom RP`).
+#[tauri::command]
+fn resolve_install_dir(picked: String) -> String {
+    paths::resolve_install_dir(Path::new(&picked))
+        .to_string_lossy()
+        .into_owned()
 }
 
 /// Установлена ли игра в указанной папке (JRE + ванильный client.jar на месте).
@@ -95,7 +104,7 @@ async fn ensure_java(
 }
 
 /// Обеспечить ванильные файлы Minecraft (client.jar, библиотеки, ассеты) с
-/// Mojang CDN. Прогресс — событием [`install::PROGRESS_EVENT`].
+/// Mojang CDN. Прогресс — событием `sync://progress`.
 #[tauri::command]
 async fn ensure_vanilla(
     app: tauri::AppHandle,
@@ -108,7 +117,7 @@ async fn ensure_vanilla(
 }
 
 /// Синхронизировать все файлы игры в указанную папку. Прогресс приходит во
-/// фронтенд событием [`install::PROGRESS_EVENT`].
+/// фронтенд событием `sync://progress`.
 #[tauri::command]
 async fn sync_files(
     app: tauri::AppHandle,
@@ -118,6 +127,21 @@ async fn sync_files(
     install::sync_files(&app, client.inner(), PathBuf::from(install_dir))
         .await
         .inspect_err(|e| log::error!("sync_files: ошибка: {e}"))
+}
+
+/// Установить игру без запуска: ваниль (Mojang) → JRE → файлы манифеста.
+/// Прогресс — событием `sync://progress`. Запоминает путь установки.
+#[tauri::command]
+async fn install_game(
+    app: tauri::AppHandle,
+    client: tauri::State<'_, reqwest::Client>,
+    install_dir: String,
+) -> Result<()> {
+    log::info!("install_game: установка в {install_dir}");
+    let _ = settings::set_install_dir(&app, Some(install_dir.clone()));
+    install::install_only(&app, client.inner(), PathBuf::from(install_dir))
+        .await
+        .inspect_err(|e| log::error!("install_game: ошибка: {e}"))
 }
 
 /// Полный цикл «Играть»: ваниль (Mojang) → JRE → файлы манифеста → запуск.
@@ -165,6 +189,24 @@ async fn launch_game(
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // Логируем паники самого лаунчера в общий лог (плагин log пишет в файл),
+    // чтобы причина падения лаунчера не терялась.
+    let default_hook = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        let location = info
+            .location()
+            .map(|l| format!("{}:{}", l.file(), l.line()))
+            .unwrap_or_else(|| "<неизвестно>".into());
+        let msg = info
+            .payload()
+            .downcast_ref::<&str>()
+            .map(|s| s.to_string())
+            .or_else(|| info.payload().downcast_ref::<String>().cloned())
+            .unwrap_or_else(|| "<без сообщения>".into());
+        log::error!("PANIC лаунчера в {location}: {msg}");
+        default_hook(info);
+    }));
+
     tauri::Builder::default()
         .plugin(
             tauri_plugin_log::Builder::new()
@@ -188,6 +230,7 @@ pub fn run() {
             default_install_dir,
             get_install_dir,
             set_install_dir,
+            resolve_install_dir,
             is_game_installed,
             uninstall_game,
             validate_install_path,
@@ -195,6 +238,7 @@ pub fn run() {
             ensure_java,
             ensure_vanilla,
             sync_files,
+            install_game,
             launch_game,
             play,
         ])

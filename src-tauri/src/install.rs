@@ -1,35 +1,21 @@
-//! Оркестрация синхронизации файлов по манифесту (способ Б).
+//! Оркестрация установки и запуска (способ Б).
 //!
-//! Тянет манифест, проходит по списку файлов и докачивает только изменённые,
-//! эмитя прогресс во фронтенд через событие [`PROGRESS_EVENT`].
+//! Тянет манифест, обеспечивает ваниль (Mojang) + JRE + файлы NeoForge/моды и
+//! при необходимости запускает игру. Весь прогресс считается единым трекером
+//! [`Progress`] (общий объём, скачано, скорость) и уходит во фронтенд событием
+//! [`crate::progress::PROGRESS_EVENT`].
 
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use serde::Serialize;
-use tauri::{AppHandle, Emitter};
+use tauri::AppHandle;
 
 use crate::error::{LauncherError, Result};
+use crate::progress::Progress;
 use crate::{config, download, java, launch, manifest, vanilla};
 
-/// Имя Tauri-события прогресса (фронтенд слушает его через `listen`).
-pub const PROGRESS_EVENT: &str = "sync://progress";
-
-/// Прогресс по текущему файлу.
-#[derive(Debug, Clone, Serialize)]
-pub struct SyncProgress {
-    /// Индекс текущего файла (0-based).
-    pub index: usize,
-    /// Всего файлов в манифесте.
-    pub total: usize,
-    /// Путь текущего файла (как в манифесте).
-    pub file: String,
-    /// Скачано байт текущего файла.
-    pub downloaded: u64,
-    /// Полный размер файла, если известен.
-    pub total_bytes: Option<u64>,
-}
-
-/// Итог синхронизации.
+/// Итог синхронизации файлов манифеста.
 #[derive(Debug, Clone, Serialize)]
 pub struct SyncSummary {
     pub total: usize,
@@ -41,9 +27,7 @@ pub struct SyncSummary {
 fn friendly_label(kind: manifest::FileKind) -> &'static str {
     match kind {
         manifest::FileKind::Mod => "Устанавливаем моды Kingdom RP",
-        manifest::FileKind::Library | manifest::FileKind::Client => {
-            "Устанавливаем NeoForge"
-        }
+        manifest::FileKind::Library | manifest::FileKind::Client => "Устанавливаем NeoForge",
         manifest::FileKind::Config => "Устанавливаем конфигурацию",
         manifest::FileKind::Asset => "Устанавливаем ресурсы",
     }
@@ -104,8 +88,7 @@ pub fn uninstall(install_dir: &Path) -> Result<()> {
 
 /// Убедиться, что JRE установлена (по секции `java` манифеста для текущей
 /// платформы). Возвращает путь к `java`-исполняемому или `None`, если в
-/// манифесте нет записи под платформу. Прогресс идёт тем же событием с
-/// `file = "Java Runtime"`.
+/// манифесте нет записи под платформу.
 pub async fn ensure_java(
     app: &AppHandle,
     client: &reqwest::Client,
@@ -116,49 +99,20 @@ pub async fn ensure_java(
     let Some(entry) = manifest.java.get(key) else {
         return Ok(None);
     };
-
-    let java_exe = java::ensure_java(client, &install_dir, entry, |d, t| {
-        let _ = app.emit(
-            PROGRESS_EVENT,
-            SyncProgress {
-                index: 0,
-                total: 1,
-                file: "Java Runtime".into(),
-                downloaded: d,
-                total_bytes: t,
-            },
-        );
-    })
-    .await?;
-
+    let progress = Progress::new(app.clone());
+    progress.add_total(entry.size);
+    let java_exe = java::ensure_java(client, &install_dir, entry, &progress).await?;
     Ok(Some(java_exe.to_string_lossy().into_owned()))
 }
 
 /// Обеспечить ванильные файлы Minecraft (с Mojang CDN) для целевой версии.
-/// Прогресс идёт тем же событием.
 pub async fn ensure_vanilla(
     app: &AppHandle,
     client: &reqwest::Client,
     install_dir: PathBuf,
 ) -> Result<()> {
-    vanilla::ensure_vanilla(
-        client,
-        &install_dir,
-        config::MINECRAFT_VERSION,
-        |index, total, name, downloaded, total_bytes| {
-            let _ = app.emit(
-                PROGRESS_EVENT,
-                SyncProgress {
-                    index,
-                    total,
-                    file: name.to_string(),
-                    downloaded,
-                    total_bytes,
-                },
-            );
-        },
-    )
-    .await
+    let progress = Progress::new(app.clone());
+    vanilla::ensure_vanilla(client, &install_dir, config::MINECRAFT_VERSION, &progress).await
 }
 
 /// Синхронизировать все файлы манифеста в `install_dir` (сам тянет манифест).
@@ -168,43 +122,36 @@ pub async fn sync_files(
     install_dir: PathBuf,
 ) -> Result<SyncSummary> {
     let manifest = manifest::fetch_manifest(client, &config::manifest_url()).await?;
-    sync_manifest(app, client, &install_dir, &manifest).await
+    let progress = Progress::new(app.clone());
+    progress.add_total(manifest.files.iter().map(|f| f.size).sum());
+    sync_manifest(client, &install_dir, &manifest, &progress).await
 }
 
-/// Докачать файлы уже полученного манифеста.
+/// Докачать файлы уже полученного манифеста, отчитываясь в общий трекер.
+/// Размеры файлов должны быть уже добавлены в `progress.add_total` вызывающим.
 pub async fn sync_manifest(
-    app: &AppHandle,
     client: &reqwest::Client,
     install_dir: &Path,
     manifest: &manifest::Manifest,
+    progress: &Progress,
 ) -> Result<SyncSummary> {
     let total = manifest.files.len();
     let mut downloaded = 0usize;
     let mut skipped = 0usize;
 
-    for (index, entry) in manifest.files.iter().enumerate() {
+    for entry in &manifest.files {
         // В манифесте пути через `/` — переводим в разделитель ОС.
         let rel = entry.path.replace('/', std::path::MAIN_SEPARATOR_STR);
         let dest = install_dir.join(rel);
-        let label = friendly_label(entry.kind);
+        progress.set_label(friendly_label(entry.kind));
 
-        let did = download::ensure_file(client, &entry.url, &dest, &entry.sha256, |d, t| {
-            let _ = app.emit(
-                PROGRESS_EVENT,
-                SyncProgress {
-                    index,
-                    total,
-                    file: label.to_string(),
-                    downloaded: d,
-                    total_bytes: t,
-                },
-            );
-        })
-        .await?;
+        let did = download::ensure_file(client, &entry.url, &dest, &entry.sha256, progress.file_cb())
+            .await?;
 
         if did {
             downloaded += 1;
         } else {
+            progress.add_skipped(entry.size);
             skipped += 1;
         }
     }
@@ -217,8 +164,62 @@ pub async fn sync_manifest(
     })
 }
 
-/// Полный цикл «Играть»: ваниль (Mojang) → JRE → файлы манифеста → запуск.
-/// Возвращает PID процесса игры. Прогресс — событием [`PROGRESS_EVENT`].
+/// Общие шаги установки (ваниль → JRE → файлы NeoForge/моды). Возвращает путь к
+/// `java`. Прогресс — в общий трекер `progress`.
+async fn sync_all(
+    client: &reqwest::Client,
+    install_dir: &Path,
+    manifest: &manifest::Manifest,
+    progress: &Progress,
+) -> Result<PathBuf> {
+    // Объём файлов манифеста (NeoForge + моды) знаем заранее.
+    progress.add_total(manifest.files.iter().map(|f| f.size).sum());
+    // Объём JRE.
+    let java_entry = manifest.java.get(java::platform_key()).ok_or_else(|| {
+        LauncherError::Other(format!(
+            "в манифесте нет JRE для платформы {}",
+            java::platform_key()
+        ))
+    })?;
+    progress.add_total(java_entry.size);
+
+    // 1. Ваниль с Mojang (client.jar + библиотеки + ассеты). Сама добавит свой
+    //    объём в общий трекер.
+    log::info!("install: [1/3] ваниль с Mojang ({})", config::MINECRAFT_VERSION);
+    vanilla::ensure_vanilla(client, install_dir, config::MINECRAFT_VERSION, progress).await?;
+
+    // 2. JRE из манифеста.
+    log::info!("install: [2/3] JRE ({})", java::platform_key());
+    let java_exe = java::ensure_java(client, install_dir, java_entry, progress).await?;
+
+    // 3. Файлы NeoForge + моды.
+    log::info!("install: [3/3] синхронизация файлов NeoForge + моды");
+    sync_manifest(client, install_dir, manifest, progress).await?;
+
+    Ok(java_exe)
+}
+
+/// Установить игру без запуска: ваниль → JRE → файлы NeoForge/моды.
+pub async fn install_only(
+    app: &AppHandle,
+    client: &reqwest::Client,
+    install_dir: PathBuf,
+) -> Result<()> {
+    let manifest = manifest::fetch_manifest(client, &config::manifest_url()).await?;
+    log::info!(
+        "install: манифест v{} (MC {}, NeoForge {}), файлов: {}",
+        manifest.version,
+        manifest.minecraft,
+        manifest.neoforge,
+        manifest.files.len()
+    );
+    let progress = Arc::new(Progress::new(app.clone()));
+    sync_all(client, &install_dir, &manifest, &progress).await?;
+    Ok(())
+}
+
+/// Полный цикл «Играть»: установка (ваниль → JRE → файлы) → запуск.
+/// Возвращает PID процесса игры.
 pub async fn play(
     app: &AppHandle,
     client: &reqwest::Client,
@@ -234,55 +235,11 @@ pub async fn play(
         manifest.files.len()
     );
 
-    // 1. Ваниль с Mojang (client.jar + библиотеки + ассеты).
-    log::info!("play: [1/4] ваниль с Mojang ({})", config::MINECRAFT_VERSION);
-    vanilla::ensure_vanilla(
-        client,
-        &install_dir,
-        config::MINECRAFT_VERSION,
-        |index, total, _name, downloaded, total_bytes| {
-            let _ = app.emit(
-                PROGRESS_EVENT,
-                SyncProgress {
-                    index,
-                    total,
-                    file: format!("Устанавливаем Minecraft {}", config::MINECRAFT_VERSION),
-                    downloaded,
-                    total_bytes,
-                },
-            );
-        },
-    )
-    .await?;
+    let progress = Arc::new(Progress::new(app.clone()));
+    let java_exe = sync_all(client, &install_dir, &manifest, &progress).await?;
 
-    // 2. JRE из манифеста.
-    log::info!("play: [2/4] JRE ({})", java::platform_key());
-    let entry = manifest.java.get(java::platform_key()).ok_or_else(|| {
-        LauncherError::Other(format!(
-            "в манифесте нет JRE для платформы {}",
-            java::platform_key()
-        ))
-    })?;
-    let java_exe = java::ensure_java(client, &install_dir, entry, |d, t| {
-        let _ = app.emit(
-            PROGRESS_EVENT,
-            SyncProgress {
-                index: 0,
-                total: 1,
-                file: "Устанавливаем Java".into(),
-                downloaded: d,
-                total_bytes: t,
-            },
-        );
-    })
-    .await?;
-
-    // 3. Файлы NeoForge + моды.
-    log::info!("play: [3/4] синхронизация файлов NeoForge + моды");
-    sync_manifest(app, client, &install_dir, &manifest).await?;
-
-    // 4. Запуск игры.
-    log::info!("play: [4/4] запуск игры");
+    // Запуск игры.
+    log::info!("play: запуск игры");
     let profile = manifest
         .neoforge_profile
         .clone()

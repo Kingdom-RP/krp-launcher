@@ -116,13 +116,19 @@ fn maven_to_path(name: &str) -> String {
     format!("{group}/{artifact}/{version}/{file}")
 }
 
-/// Ключ дедупа classpath: `group:artifact`.
+/// Ключ дедупа classpath: `group:artifact:classifier`.
+///
+/// Классификатор ОБЯЗАН входить в ключ: иначе нативный jar
+/// (`org.lwjgl:lwjgl:3.3.1:natives-windows`) считается дубликатом обычного
+/// (`org.lwjgl:lwjgl:3.3.1`) и выкидывается из classpath — а без него LWJGL не
+/// находит `lwjgl.dll` и игра падает с `UnsatisfiedLinkError` на старте.
 fn lib_key(name: &str) -> String {
-    let parts: Vec<&str> = name.splitn(3, ':').collect();
+    let parts: Vec<&str> = name.split(':').collect();
     format!(
-        "{}:{}",
+        "{}:{}:{}",
         parts.first().copied().unwrap_or(""),
-        parts.get(1).copied().unwrap_or("")
+        parts.get(1).copied().unwrap_or(""),
+        parts.get(3).copied().unwrap_or("") // классификатор (natives-*)
     )
 }
 

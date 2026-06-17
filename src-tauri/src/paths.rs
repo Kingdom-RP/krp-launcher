@@ -10,11 +10,25 @@ use serde::Serialize;
 
 use crate::error::{LauncherError, Result};
 
-/// Папка установки по умолчанию: `%APPDATA%\KingdomRP`.
+/// Имя папки игры, которое лаунчер добавляет к выбранному каталогу.
+pub const APP_DIR_NAME: &str = "Kingdom RP";
+
+/// Папка установки по умолчанию: `%APPDATA%\Kingdom RP`.
 pub fn default_install_dir() -> Result<PathBuf> {
     let base = dirs::data_dir()
         .ok_or_else(|| LauncherError::Other("не удалось определить папку AppData".into()))?;
-    Ok(base.join("KingdomRP"))
+    Ok(base.join(APP_DIR_NAME))
+}
+
+/// Привести выбранный игроком каталог к папке установки: если он ещё не
+/// заканчивается на `Kingdom RP`, добавляем эту подпапку. Так выбор `E:\Games`
+/// превращается в `E:\Games\Kingdom RP`, и лаунчер сам создаёт нужную папку.
+pub fn resolve_install_dir(picked: &Path) -> PathBuf {
+    if picked.file_name().and_then(|n| n.to_str()) == Some(APP_DIR_NAME) {
+        picked.to_path_buf()
+    } else {
+        picked.join(APP_DIR_NAME)
+    }
 }
 
 /// Результат проверки выбранного пути.
