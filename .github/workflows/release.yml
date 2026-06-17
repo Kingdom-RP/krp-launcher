@@ -14,8 +14,10 @@
 #   2. В репозитории Settings → Secrets and variables → Actions добавить:
 #        TAURI_SIGNING_PRIVATE_KEY           = содержимое файла krp.key
 #        TAURI_SIGNING_PRIVATE_KEY_PASSWORD  = пароль ключа (пустой, если без пароля)
-#   3. Версию поднимать в src-tauri/tauri.conf.json (`version`) и тегать так же:
-#        git tag v0.1.1 && git push --tags
+#   3. Релиз: достаточно поставить тег — версию в tauri.conf.json/package.json
+#      CI проставит сам из имени тега (шаг «Set version from tag»). Руками файл
+#      править не нужно:
+#        git tag v0.2.2 && git push origin v0.2.2
 #   ВАЖНО: приватный ключ НЕЛЬЗЯ терять и НЕЛЬЗЯ коммитить — без него обновления
 #   перестанут проходить проверку подписи у уже установленных лаунчеров.
 
@@ -63,6 +65,11 @@ jobs:
 
       - name: Install frontend deps
         run: npm ci
+
+      # Версия для сборки берётся из тега (vX.Y.Z → X.Y.Z) — ручной бамп не нужен.
+      - name: Set version from tag
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: node scripts/set-version.mjs ${{ github.ref_name }}
 
       - name: Build, sign & release
         uses: tauri-apps/tauri-action@v0
