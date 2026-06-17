@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import {
   confirmAction,
   getInstallDir,
+  getPlayerName,
   installGame,
   isGameInstalled,
   onSyncProgress,
@@ -10,6 +11,7 @@ import {
   play,
   resolveInstallDir,
   setInstallDir as persistInstallDir,
+  setPlayerName as persistPlayerName,
   uninstallGame,
   validateInstallPath,
   type PathValidation,
@@ -21,6 +23,13 @@ import { error as logError, info as logInfo } from "@tauri-apps/plugin-log";
 import "./App.css";
 
 type Phase = "idle" | "syncing" | "done" | "error";
+
+type ToastKind = "ok" | "error" | "info";
+interface Toast {
+  id: number;
+  kind: ToastKind;
+  text: string;
+}
 
 // Ник Minecraft: 3–16 символов, только латиница/цифры/подчёркивание.
 // (Ограничение игрового сервера — 16 символов; меньше 3 сервер не принимает.)
@@ -71,10 +80,22 @@ function App() {
 
   const [version, setVersion] = useState("");
 
+  // Тосты-уведомления.
+  const [toasts, setToasts] = useState<Toast[]>([]);
+
   // Автообновление лаунчера.
   const [update, setUpdate] = useState<Update | null>(null);
   const [updatingLauncher, setUpdatingLauncher] = useState(false);
   const [updatePct, setUpdatePct] = useState(0);
+  const [checkingUpdate, setCheckingUpdate] = useState(false);
+
+  function pushToast(kind: ToastKind, text: string) {
+    const id = Date.now() + Math.random();
+    setToasts((prev) => [...prev, { id, kind, text }]);
+    window.setTimeout(() => {
+      setToasts((prev) => prev.filter((t) => t.id !== id));
+    }, 4000);
+  }
 
   // Запомненная (или дефолтная) папка при старте.
   useEffect(() => {
@@ -120,6 +141,19 @@ function App() {
     getVersion().then(setVersion).catch(() => {});
   }, []);
 
+  // Запомненный никнейм при старте.
+  useEffect(() => {
+    getPlayerName()
+      .then((n) => n && setPlayerName(n))
+      .catch(() => {});
+  }, []);
+
+  // Сохранять никнейм при изменении.
+  function onNickChange(value: string) {
+    setPlayerName(value);
+    persistPlayerName(value).catch(() => {});
+  }
+
   async function onUpdateLauncher() {
     if (!update) return;
     setUpdatingLauncher(true);
@@ -131,6 +165,25 @@ function App() {
     } catch (e) {
       setErrorMsg(String(e));
       setUpdatingLauncher(false);
+    }
+  }
+
+  // Ручная проверка обновления лаунчера (с уведомлением-тостом).
+  async function onCheckUpdate() {
+    setCheckingUpdate(true);
+    try {
+      const u = await checkUpdate();
+      setUpdate(u);
+      if (u) {
+        pushToast("ok", `Доступно обновление лаунчера: v${u.version}`);
+      } else {
+        pushToast("info", `Установлена последняя версия${version ? ` (v${version})` : ""}`);
+      }
+    } catch (e) {
+      pushToast("error", `Не удалось проверить обновление: ${e}`);
+      logError(`UI: ошибка проверки обновления: ${e}`);
+    } finally {
+      setCheckingUpdate(false);
     }
   }
 
@@ -284,7 +337,7 @@ function App() {
                 maxLength={NICK_MAX}
                 placeholder="Латиница, цифры и _"
                 disabled={phase === "syncing"}
-                onChange={(e) => setPlayerName(e.currentTarget.value)}
+                onChange={(e) => onNickChange(e.currentTarget.value)}
               />
             </div>
           </section>
@@ -372,6 +425,14 @@ function App() {
           )}
           <button
             className="folder-btn"
+            title="Проверить обновление лаунчера"
+            disabled={checkingUpdate}
+            onClick={onCheckUpdate}
+          >
+            🔄
+          </button>
+          <button
+            className="folder-btn"
             title="Открыть папку игры"
             disabled={!installDir}
             onClick={onOpenFolder}
@@ -380,6 +441,16 @@ function App() {
           </button>
         </div>
       </footer>
+
+      {/* Тосты-уведомления */}
+      <div className="toast-stack">
+        {toasts.map((t) => (
+          <div key={t.id} className={`toast ${t.kind}`}>
+            {t.kind === "ok" ? "✅ " : t.kind === "error" ? "⛔ " : "ℹ️ "}
+            {t.text}
+          </div>
+        ))}
+      </div>
     </div>
   );
 }

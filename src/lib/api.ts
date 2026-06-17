@@ -3,12 +3,11 @@
 
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
-import { openPath } from "@tauri-apps/plugin-opener";
 import { open as openDialog, confirm as confirmDialog } from "@tauri-apps/plugin-dialog";
 
-/** Открыть папку установки игры в системном проводнике. */
+/** Открыть папку установки игры в системном файловом менеджере. */
 export function openInstallDir(path: string): Promise<void> {
-  return openPath(path);
+  return invoke<void>("open_dir", { path });
 }
 
 /** Показать системный диалог выбора каталога установки.
@@ -71,6 +70,16 @@ export function setInstallDir(installDir: string): Promise<void> {
 /** Привести выбранный каталог к папке установки (добавить «Kingdom RP»). */
 export function resolveInstallDir(picked: string): Promise<string> {
   return invoke<string>("resolve_install_dir", { picked });
+}
+
+/** Запомненный никнейм игрока (пустая строка, если ещё не вводили). */
+export function getPlayerName(): Promise<string> {
+  return invoke<string>("get_player_name");
+}
+
+/** Запомнить никнейм игрока. */
+export function setPlayerName(playerName: string): Promise<void> {
+  return invoke<void>("set_player_name", { playerName });
 }
 
 /** Удалить установленную игру (миры/настройки игрока сохраняются). */

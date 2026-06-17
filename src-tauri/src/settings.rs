@@ -18,6 +18,9 @@ pub struct Settings {
     /// Папка, куда установлена игра (если игрок её выбирал/устанавливал).
     #[serde(default)]
     pub install_dir: Option<String>,
+    /// Последний введённый никнейм игрока.
+    #[serde(default)]
+    pub player_name: Option<String>,
 }
 
 fn settings_path(app: &AppHandle) -> Result<PathBuf> {
@@ -54,5 +57,12 @@ pub fn save(app: &AppHandle, settings: &Settings) -> Result<()> {
 pub fn set_install_dir(app: &AppHandle, dir: Option<String>) -> Result<()> {
     let mut s = load(app);
     s.install_dir = dir;
+    save(app, &s)
+}
+
+/// Запомнить никнейм игрока.
+pub fn set_player_name(app: &AppHandle, name: Option<String>) -> Result<()> {
+    let mut s = load(app);
+    s.player_name = name;
     save(app, &s)
 }

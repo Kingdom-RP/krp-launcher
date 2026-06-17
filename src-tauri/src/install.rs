@@ -5,6 +5,7 @@
 //! [`Progress`] (общий объём, скачано, скорость) и уходит во фронтенд событием
 //! [`crate::progress::PROGRESS_EVENT`].
 
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -164,6 +165,49 @@ pub async fn sync_manifest(
     })
 }
 
+/// Удалить из папки `mods` всё, чего нет в манифесте — посторонние/читерские
+/// моды, которые игрок мог подложить вручную перед запуском. Файлы из манифеста
+/// остаются (их целостность уже гарантирована sync по SHA-256). Возвращает
+/// число удалённых файлов.
+fn prune_mods(install_dir: &Path, manifest: &manifest::Manifest) -> Result<usize> {
+    let allowed: HashSet<String> = manifest
+        .files
+        .iter()
+        .map(|f| f.path.replace('\\', "/").to_lowercase())
+        .collect();
+
+    let mods_dir = install_dir.join("mods");
+    if !mods_dir.exists() {
+        return Ok(0);
+    }
+
+    let mut removed = 0usize;
+    let mut stack = vec![mods_dir];
+    while let Some(dir) = stack.pop() {
+        let Ok(entries) = std::fs::read_dir(&dir) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                stack.push(path);
+                continue;
+            }
+            let rel = path
+                .strip_prefix(install_dir)
+                .unwrap_or(&path)
+                .to_string_lossy()
+                .replace('\\', "/")
+                .to_lowercase();
+            if !allowed.contains(&rel) && std::fs::remove_file(&path).is_ok() {
+                log::warn!("prune: удалён посторонний файл в mods: {}", path.display());
+                removed += 1;
+            }
+        }
+    }
+    Ok(removed)
+}
+
 /// Общие шаги установки (ваниль → JRE → файлы NeoForge/моды). Возвращает путь к
 /// `java`. Прогресс — в общий трекер `progress`.
 async fn sync_all(
@@ -195,6 +239,12 @@ async fn sync_all(
     // 3. Файлы NeoForge + моды.
     log::info!("install: [3/3] синхронизация файлов NeoForge + моды");
     sync_manifest(client, install_dir, manifest, progress).await?;
+
+    // Анти-чит: убираем из mods всё, чего нет в манифесте.
+    let pruned = prune_mods(install_dir, manifest)?;
+    if pruned > 0 {
+        log::info!("install: удалено посторонних файлов из mods: {pruned}");
+    }
 
     Ok(java_exe)
 }

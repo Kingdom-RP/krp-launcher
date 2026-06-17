@@ -58,6 +58,54 @@ fn resolve_install_dir(picked: String) -> String {
         .into_owned()
 }
 
+/// Запомненный никнейм игрока (пустая строка, если ещё не вводили).
+#[tauri::command]
+fn get_player_name(app: tauri::AppHandle) -> String {
+    settings::load(&app).player_name.unwrap_or_default()
+}
+
+/// Запомнить никнейм игрока.
+#[tauri::command]
+fn set_player_name(app: tauri::AppHandle, player_name: String) -> Result<()> {
+    let value = if player_name.is_empty() {
+        None
+    } else {
+        Some(player_name)
+    };
+    settings::set_player_name(&app, value)
+}
+
+/// Открыть папку в системном файловом менеджере (Explorer / xdg-open).
+/// Свой обработчик надёжнее scope-ограничений plugin-opener для произвольных
+/// путей вроде `E:\Games\Kingdom RP`.
+#[tauri::command]
+fn open_dir(path: String) -> Result<()> {
+    let p = Path::new(&path);
+    if !p.exists() {
+        return Err(error::LauncherError::Other(format!(
+            "папка не найдена: {path}"
+        )));
+    }
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        // explorer возвращает ненулевой код даже при успехе — не проверяем статус.
+        let _ = std::process::Command::new("explorer")
+            .creation_flags(CREATE_NO_WINDOW)
+            .arg(p)
+            .spawn();
+    }
+    #[cfg(target_os = "linux")]
+    {
+        std::process::Command::new("xdg-open")
+            .arg(p)
+            .spawn()
+            .map_err(|e| error::LauncherError::Other(format!("не открыть папку: {e}")))?;
+    }
+    Ok(())
+}
+
 /// Установлена ли игра в указанной папке (JRE + ванильный client.jar на месте).
 /// Нужна фронтенду, чтобы подписать кнопку «Играть» или «Установить».
 #[tauri::command]
@@ -154,9 +202,12 @@ async fn play(
     player_name: String,
 ) -> Result<u32> {
     log::info!("play: установка и запуск для '{player_name}' в {install_dir}");
-    // Запоминаем путь сразу: даже если игра упадёт на старте, файлы уже там,
-    // и при следующем запуске лаунчер не предложит ставить заново.
+    // Запоминаем путь и ник сразу: даже если игра упадёт на старте, файлы уже
+    // там, и при следующем запуске лаунчер не предложит ставить заново.
     let _ = settings::set_install_dir(&app, Some(install_dir.clone()));
+    if !player_name.is_empty() {
+        let _ = settings::set_player_name(&app, Some(player_name.clone()));
+    }
     install::play(&app, client.inner(), PathBuf::from(install_dir), player_name)
         .await
         .inspect(|pid| log::info!("play: игра запущена, pid={pid}"))
@@ -231,6 +282,9 @@ pub fn run() {
             get_install_dir,
             set_install_dir,
             resolve_install_dir,
+            get_player_name,
+            set_player_name,
+            open_dir,
             is_game_installed,
             uninstall_game,
             validate_install_path,

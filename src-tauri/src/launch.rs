@@ -183,7 +183,14 @@ pub fn build_args(
     let vanilla = read_version(&vanilla_path)?;
     let forge = read_version(&forge_path)?;
 
-    // ---- classpath: NeoForge-либы, затем ванильные (дедуп), затем client.jar ----
+    // ---- classpath: NeoForge-либы, затем ванильные библиотеки (дедуп) ----
+    // ВАЖНО: ванильный client.jar (`versions/1.20.1/1.20.1.jar`) в classpath НЕ
+    // добавляем. Патченый клиент NeoForge приходит модулем `minecraft` из
+    // `libraries/.../client-…-srg.jar` (+ `client-…-extra.jar` с ресурсами),
+    // которые modlauncher находит по `-DlibraryDirectory`. Если добавить и
+    // ванильный jar, Java делает из него автоматический модуль `_1._20._1`,
+    // и он конфликтует с `minecraft` (оба экспортят `net.minecraft.client.main`)
+    // → `ResolutionException` и краш на старте.
     let sep = if cfg!(windows) { ';' } else { ':' };
     let libraries_dir = install_dir.join("libraries");
     let mut seen: HashSet<String> = HashSet::new();
@@ -209,15 +216,6 @@ pub fn build_args(
                 .into_owned(),
         );
     }
-    // Ванильный client.jar.
-    cp.push(
-        install_dir
-            .join("versions")
-            .join(mc_version)
-            .join(format!("{mc_version}.jar"))
-            .to_string_lossy()
-            .into_owned(),
-    );
     let classpath = cp.join(&sep.to_string());
 
     let assets_index = vanilla.assets.clone().unwrap_or_else(|| mc_version.to_string());
