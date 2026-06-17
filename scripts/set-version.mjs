@@ -24,15 +24,20 @@ if (!/^\d+\.\d+\.\d+$/.test(version)) {
   process.exit(1);
 }
 
+const VERSION_RE = /("version":\s*")[^"]+(")/;
 const files = ["src-tauri/tauri.conf.json", "package.json"];
 for (const rel of files) {
   const path = join(root, rel);
   const content = readFileSync(path, "utf8");
-  const updated = content.replace(/("version":\s*")[^"]+(")/, `$1${version}$2`);
-  if (updated === content) {
+  if (!VERSION_RE.test(content)) {
     console.error(`Не найдено поле "version" в ${rel}`);
     process.exit(1);
   }
-  writeFileSync(path, updated);
-  console.log(`${rel} → ${version}`);
+  const updated = content.replace(VERSION_RE, `$1${version}$2`);
+  if (updated !== content) {
+    writeFileSync(path, updated);
+    console.log(`${rel} → ${version}`);
+  } else {
+    console.log(`${rel} уже ${version} — пропускаем`);
+  }
 }
