@@ -58,8 +58,6 @@ pub struct VersionDownloads {
 pub struct Download {
     pub url: String,
     pub sha1: String,
-    #[serde(default)]
-    pub size: u64,
 }
 
 #[derive(Debug, Deserialize)]
@@ -81,8 +79,6 @@ pub struct Artifact {
     pub path: String,
     pub url: String,
     pub sha1: String,
-    #[serde(default)]
-    pub size: u64,
 }
 
 #[derive(Debug, Deserialize)]
@@ -100,11 +96,8 @@ pub struct OsRule {
 
 #[derive(Debug, Deserialize)]
 pub struct AssetIndexRef {
-    pub id: String,
     pub url: String,
     pub sha1: String,
-    #[serde(default)]
-    pub size: u64,
 }
 
 #[derive(Debug, Deserialize)]
@@ -115,8 +108,6 @@ pub struct AssetIndex {
 #[derive(Debug, Deserialize)]
 pub struct AssetObject {
     pub hash: String,
-    #[serde(default)]
-    pub size: u64,
 }
 
 // ---- логика ----
@@ -161,7 +152,8 @@ pub async fn fetch_version_manifest(client: &reqwest::Client) -> Result<VersionM
         .await?)
 }
 
-/// Найти URL version JSON конкретной версии.
+/// Найти URL version JSON конкретной версии. (Используется в тестах.)
+#[allow(dead_code)]
 pub fn find_version_url<'a>(manifest: &'a VersionManifest, version_id: &str) -> Result<&'a str> {
     manifest
         .versions

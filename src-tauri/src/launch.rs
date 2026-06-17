@@ -14,8 +14,9 @@
 //! Авторизация пока офлайн (фиктивные uuid/token); онлайн-вход — отдельная фаза.
 
 use std::collections::HashSet;
+use std::io::{Read, Seek, SeekFrom};
 use std::path::Path;
-use std::process::Command;
+use std::process::{Command, Stdio};
 
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
@@ -271,7 +272,29 @@ pub fn build_args(
     Ok(cmd_args)
 }
 
+/// Прочитать последние `max_bytes` байт текстового файла (хвост лога игры).
+fn read_log_tail(path: &Path, max_bytes: u64) -> String {
+    let Ok(mut file) = std::fs::File::open(path) else {
+        return String::new();
+    };
+    let len = file.metadata().map(|m| m.len()).unwrap_or(0);
+    let start = len.saturating_sub(max_bytes);
+    if start > 0 {
+        let _ = file.seek(SeekFrom::Start(start));
+    }
+    let mut buf = String::new();
+    let _ = file.read_to_string(&mut buf);
+    buf
+}
+
 /// Собрать аргументы и запустить java. Возвращает PID процесса игры.
+///
+/// stdout/stderr игры перенаправляются в `<install>/logs/latest-launch.log`
+/// (раньше java открывала отдельное окно консоли, которое мелькало и
+/// закрывалось — причину падения было не видно). На Windows окно консоли не
+/// создаётся. После старта короткое время ждём: если процесс упал сразу
+/// (битый classpath, ошибка JVM и т.п.) — возвращаем ошибку с хвостом лога,
+/// а не ложное «игра запущена».
 pub fn launch(
     install_dir: &Path,
     mc_version: &str,
@@ -280,12 +303,64 @@ pub fn launch(
     player_name: &str,
 ) -> Result<u32> {
     let cmd_args = build_args(install_dir, mc_version, neoforge_profile_rel, player_name)?;
-    let child = Command::new(java_exe)
+
+    let logs_dir = install_dir.join("logs");
+    std::fs::create_dir_all(&logs_dir).ok();
+    let log_path = logs_dir.join("latest-launch.log");
+    let stdout_file = std::fs::File::create(&log_path).map_err(|e| {
+        LauncherError::Other(format!("не создать лог запуска {}: {e}", log_path.display()))
+    })?;
+    let stderr_file = stdout_file
+        .try_clone()
+        .map_err(|e| LauncherError::Other(format!("клонирование лог-файла игры: {e}")))?;
+
+    log::info!(
+        "launch: {} (аргументов: {}); лог игры → {}",
+        java_exe.display(),
+        cmd_args.len(),
+        log_path.display()
+    );
+
+    let mut command = Command::new(java_exe);
+    command
         .args(&cmd_args)
         .current_dir(install_dir)
+        .stdout(Stdio::from(stdout_file))
+        .stderr(Stdio::from(stderr_file));
+
+    // Windows: не плодить мелькающее окно консоли для java.
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        command.creation_flags(CREATE_NO_WINDOW);
+    }
+
+    let mut child = command
         .spawn()
         .map_err(|e| LauncherError::Other(format!("не запустить java: {e}")))?;
-    Ok(child.id())
+    let pid = child.id();
+
+    // Детект раннего краха: даём процессу немного времени и проверяем статус.
+    std::thread::sleep(std::time::Duration::from_millis(2500));
+    match child.try_wait() {
+        Ok(Some(status)) if !status.success() => {
+            let tail = read_log_tail(&log_path, 4000);
+            log::error!("launch: игра завершилась сразу ({status}). Хвост лога:\n{tail}");
+            return Err(LauncherError::Other(format!(
+                "Игра завершилась сразу после запуска ({status}). \
+                 Полный лог: {}\n\n…{tail}",
+                log_path.display()
+            )));
+        }
+        Ok(Some(status)) => {
+            log::warn!("launch: процесс игры завершился сразу с кодом успеха ({status})");
+        }
+        Ok(None) => log::info!("launch: игра работает, pid={pid}"),
+        Err(e) => log::warn!("launch: не удалось опросить статус процесса игры: {e}"),
+    }
+
+    Ok(pid)
 }
 
 #[cfg(test)]

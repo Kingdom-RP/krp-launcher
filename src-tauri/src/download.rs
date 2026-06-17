@@ -3,7 +3,7 @@
 //! Базовый кирпич для всего остального: загрузки Java, NeoForge и модов
 //! проходят через эти функции.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use futures_util::StreamExt;
 use sha1::Sha1;
@@ -30,6 +30,12 @@ pub async fn sha1_file(path: &Path) -> Result<String> {
 
 /// Скачать `url` в `dest`, сообщая прогресс через `on_progress(downloaded, total)`.
 /// `total` = `None`, если сервер не прислал `Content-Length`.
+///
+/// Качаем во временный файл `<dest>.part` и только при успешном завершении
+/// атомарно переименовываем в `dest`. Так обрыв связи/ошибка не оставляют
+/// «полуфайл» на месте готового: прежний валидный `dest` (если был) уцелеет, а
+/// при повторном запуске проверка SHA-256 не пропустит битый файл, и докачается
+/// только он (а не весь модпак заново).
 pub async fn download_to_file<F>(
     client: &reqwest::Client,
     url: &str,
@@ -43,6 +49,37 @@ where
         tokio::fs::create_dir_all(parent).await?;
     }
 
+    let part = part_path(dest);
+
+    let result = stream_to_file(client, url, &part, on_progress).await;
+    if result.is_err() {
+        // Чистим недокачанный временный файл, чтобы не копился мусор.
+        let _ = tokio::fs::remove_file(&part).await;
+        return result;
+    }
+
+    // Атомарная замена (на Windows перезапишет существующий dest).
+    tokio::fs::rename(&part, dest).await?;
+    Ok(())
+}
+
+/// Путь временного файла загрузки (`<dest>.part`).
+fn part_path(dest: &Path) -> PathBuf {
+    let mut s = dest.as_os_str().to_owned();
+    s.push(".part");
+    PathBuf::from(s)
+}
+
+/// Потоковая запись тела ответа в файл с прогрессом.
+async fn stream_to_file<F>(
+    client: &reqwest::Client,
+    url: &str,
+    dest: &Path,
+    on_progress: F,
+) -> Result<()>
+where
+    F: Fn(u64, Option<u64>),
+{
     let resp = client.get(url).send().await?.error_for_status()?;
     let total = resp.content_length();
 

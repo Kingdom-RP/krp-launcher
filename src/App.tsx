@@ -1,9 +1,14 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import {
-  defaultInstallDir,
+  confirmAction,
+  getInstallDir,
+  isGameInstalled,
   onSyncProgress,
   openInstallDir,
+  pickInstallDir,
   play,
+  setInstallDir as persistInstallDir,
+  uninstallGame,
   validateInstallPath,
   type PathValidation,
   type SyncProgress,
@@ -14,6 +19,27 @@ import "./App.css";
 
 type Phase = "idle" | "syncing" | "done" | "error";
 
+// Ник Minecraft: 3–16 символов, только латиница/цифры/подчёркивание.
+// (Ограничение игрового сервера — 16 символов; меньше 3 сервер не принимает.)
+const NICK_MAX = 16;
+const NICK_MIN = 3;
+
+/** Текст ошибки валидации ника или `null`, если ник корректен/пуст. */
+function nickError(name: string): string | null {
+  if (name.length === 0) return null; // до ввода ничего не показываем
+  if (!/^[A-Za-z0-9_]*$/.test(name)) {
+    return "Ник — только латиница, цифры и подчёркивание (_)";
+  }
+  if (name.length < NICK_MIN) return `Ник слишком короткий (минимум ${NICK_MIN} символа)`;
+  if (name.length > NICK_MAX) return `Ник слишком длинный (максимум ${NICK_MAX} символов)`;
+  return null;
+}
+
+/** Корректен ли ник для запуска. */
+function nickValid(name: string): boolean {
+  return /^[A-Za-z0-9_]{3,16}$/.test(name);
+}
+
 function formatBytes(n: number): string {
   if (n < 1024) return `${n} Б`;
   if (n < 1024 * 1024) return `${(n / 1024).toFixed(0)} КБ`;
@@ -23,7 +49,7 @@ function formatBytes(n: number): string {
 
 function App() {
   const [installDir, setInstallDir] = useState("");
-  const [editingPath, setEditingPath] = useState(false);
+  const [installed, setInstalled] = useState(false);
   const [validation, setValidation] = useState<PathValidation | null>(null);
 
   const [playerName, setPlayerName] = useState("");
@@ -37,16 +63,29 @@ function App() {
   const [updatingLauncher, setUpdatingLauncher] = useState(false);
   const [updatePct, setUpdatePct] = useState(0);
 
-  // Папка по умолчанию при старте.
+  // Запомненная (или дефолтная) папка при старте.
   useEffect(() => {
-    defaultInstallDir()
-      .then((dir) => {
-        setInstallDir(dir);
-        return validateInstallPath(dir);
-      })
-      .then((v) => v && setValidation(v))
+    getInstallDir()
+      .then((dir) => applyPath(dir))
       .catch((e) => setErrorMsg(String(e)));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Применить выбранный путь: запомнить, проверить валидность и факт установки.
+  async function applyPath(dir: string) {
+    setInstallDir(dir);
+    try {
+      const v = await validateInstallPath(dir);
+      setValidation(v);
+    } catch {
+      /* ошибки валидации не критичны для UI */
+    }
+    try {
+      setInstalled(await isGameInstalled(dir));
+    } catch {
+      setInstalled(false);
+    }
+  }
 
   // Подписка на прогресс синхронизации.
   useEffect(() => {
@@ -77,14 +116,39 @@ function App() {
     }
   }
 
-  // Валидация при ручном вводе пути (с дебаунсом).
-  const debounceRef = useRef<number | undefined>(undefined);
-  function onPathChange(value: string) {
-    setInstallDir(value);
-    window.clearTimeout(debounceRef.current);
-    debounceRef.current = window.setTimeout(() => {
-      validateInstallPath(value).then(setValidation).catch(() => {});
-    }, 300);
+  // Выбор папки установки через системный диалог.
+  async function onChangePath() {
+    try {
+      const picked = await pickInstallDir(installDir);
+      if (picked) {
+        await applyPath(picked);
+        persistInstallDir(picked).catch(() => {});
+        logInfo(`UI: выбрана папка установки ${picked}`);
+      }
+    } catch (e) {
+      logError(`UI: ошибка выбора папки: ${e}`);
+    }
+  }
+
+  // Удаление установленной игры (с подтверждением).
+  async function onUninstall() {
+    const ok = await confirmAction(
+      `Удалить игру из папки:\n${installDir}\n\nМиры и настройки игрока сохранятся. Файлы игры (Java, моды, Minecraft) будут удалены.`,
+      "Удаление игры",
+    );
+    if (!ok) return;
+    setPhase("idle");
+    setErrorMsg("");
+    setPid(null);
+    try {
+      await uninstallGame(installDir);
+      setInstalled(false);
+      logInfo(`UI: игра удалена из ${installDir}`);
+    } catch (e) {
+      setErrorMsg(String(e));
+      setPhase("error");
+      logError(`UI: ошибка удаления: ${e}`);
+    }
   }
 
   async function onPlay() {
@@ -97,6 +161,8 @@ function App() {
       const launchedPid = await play(installDir, playerName.trim());
       setPid(launchedPid);
       setPhase("done");
+      // После успешной установки/запуска кнопка должна стать «Играть».
+      isGameInstalled(installDir).then(setInstalled).catch(() => {});
     } catch (e) {
       setErrorMsg(String(e));
       setPhase("error");
@@ -117,7 +183,9 @@ function App() {
     phase !== "syncing" &&
     (validation?.valid ?? false) &&
     installDir.length > 0 &&
-    playerName.trim().length > 0;
+    nickValid(playerName.trim());
+
+  const nickMsg = nickError(playerName);
 
   const fileProgress =
     progress && progress.total_bytes
@@ -154,43 +222,37 @@ function App() {
         <section className="row path-row">
           <div className="path-info">
             <span className="label">Папка установки</span>
-            {editingPath ? (
-              <input
-                className="path-input"
-                value={installDir}
-                spellCheck={false}
-                onChange={(e) => onPathChange(e.currentTarget.value)}
-              />
-            ) : (
-              <span className="path-value" title={installDir}>
-                {installDir || "…"}
-              </span>
-            )}
+            <span className="path-value" title={installDir}>
+              {installDir || "…"}
+            </span>
           </div>
           <button
             className="ghost"
             disabled={phase === "syncing"}
-            onClick={() => setEditingPath((v) => !v)}
+            onClick={onChangePath}
           >
-            {editingPath ? "Готово" : "Изменить"}
+            Изменить
           </button>
         </section>
 
-        {/* Имя игрока */}
+        {/* Никнейм */}
         <section className="row">
           <div className="path-info">
-            <span className="label">Имя игрока</span>
+            <span className="label">Никнейм</span>
             <input
               className="path-input"
               value={playerName}
               spellCheck={false}
-              maxLength={16}
-              placeholder="Ник в игре"
+              maxLength={NICK_MAX}
+              placeholder="Латиница, цифры и _"
               disabled={phase === "syncing"}
               onChange={(e) => setPlayerName(e.currentTarget.value)}
             />
           </div>
         </section>
+
+        {/* Ошибка валидации ника */}
+        {nickMsg && <p className="msg error">⛔ {nickMsg}</p>}
 
         {/* Ошибки/предупреждения валидации пути */}
         {validation?.errors.map((msg) => (
@@ -238,9 +300,15 @@ function App() {
           <p className="msg error">⛔ {errorMsg}</p>
         )}
 
-        {/* Кнопка запуска */}
+        {/* Кнопка запуска: «Установить», пока игра не установлена, иначе «Играть» */}
         <button className="play" disabled={!canPlay} onClick={onPlay}>
-          {phase === "syncing" ? "Установка и запуск…" : "ИГРАТЬ"}
+          {phase === "syncing"
+            ? installed
+              ? "Запуск…"
+              : "Установка…"
+            : installed
+              ? "ИГРАТЬ"
+              : "УСТАНОВИТЬ"}
         </button>
       </main>
 
@@ -248,6 +316,16 @@ function App() {
         <span>Kingdom RP Launcher</span>
         <div className="footer-right">
           <span className="version">v0.1.0</span>
+          {installed && (
+            <button
+              className="folder-btn"
+              title="Удалить игру"
+              disabled={phase === "syncing"}
+              onClick={onUninstall}
+            >
+              🗑️
+            </button>
+          )}
           <button
             className="folder-btn"
             title="Открыть папку игры"

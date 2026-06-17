@@ -37,6 +37,71 @@ pub struct SyncSummary {
     pub skipped: usize,
 }
 
+/// Понятная игроку подпись этапа по типу файла (для UI-прогресса).
+fn friendly_label(kind: manifest::FileKind) -> &'static str {
+    match kind {
+        manifest::FileKind::Mod => "Устанавливаем моды Kingdom RP",
+        manifest::FileKind::Library | manifest::FileKind::Client => {
+            "Устанавливаем NeoForge"
+        }
+        manifest::FileKind::Config => "Устанавливаем конфигурацию",
+        manifest::FileKind::Asset => "Устанавливаем ресурсы",
+    }
+}
+
+/// Грубая проверка «игра установлена»: распакованная JRE + ванильный client.jar
+/// уже на диске. Без обращения к сети — нужна для подписи кнопки
+/// «Играть» / «Установить» (см. фронтенд).
+pub fn is_installed(install_dir: &Path) -> bool {
+    let java_ok = java::java_exe_path(install_dir, "runtime").exists();
+    let client_ok = install_dir
+        .join("versions")
+        .join(config::MINECRAFT_VERSION)
+        .join(format!("{}.jar", config::MINECRAFT_VERSION))
+        .exists();
+    java_ok && client_ok
+}
+
+/// Каталоги, которыми управляет лаунчер (удаляются при деинсталляции).
+/// Пользовательские данные (`saves`, `screenshots`, `resourcepacks`,
+/// `options.txt`) НЕ трогаем — это миры и настройки игрока.
+const MANAGED_DIRS: &[&str] = &[
+    "runtime",
+    "versions",
+    "libraries",
+    "assets",
+    "natives",
+    "mods",
+    "logs",
+    "crash-reports",
+];
+
+/// Удалить установленную игру из `install_dir`: сносит каталоги, которыми
+/// управляет лаунчер, и временные файлы загрузок. Миры/настройки игрока
+/// сохраняются. Саму папку установки не удаляем (в неё могли вложить игру
+/// вручную в общей директории).
+pub fn uninstall(install_dir: &Path) -> Result<()> {
+    for name in MANAGED_DIRS {
+        let p = install_dir.join(name);
+        if p.exists() {
+            std::fs::remove_dir_all(&p)
+                .map_err(|e| LauncherError::Other(format!("не удалить {}: {e}", p.display())))?;
+        }
+    }
+    // Хвосты прерванных загрузок (.part и архивы JRE *.download.*).
+    if let Ok(entries) = std::fs::read_dir(install_dir) {
+        for entry in entries.flatten() {
+            let name = entry.file_name();
+            let name = name.to_string_lossy();
+            if name.ends_with(".part") || name.contains(".download.") {
+                let _ = std::fs::remove_file(entry.path());
+            }
+        }
+    }
+    log::info!("uninstall: игра удалена из {}", install_dir.display());
+    Ok(())
+}
+
 /// Убедиться, что JRE установлена (по секции `java` манифеста для текущей
 /// платформы). Возвращает путь к `java`-исполняемому или `None`, если в
 /// манифесте нет записи под платформу. Прогресс идёт тем же событием с
@@ -121,7 +186,7 @@ pub async fn sync_manifest(
         // В манифесте пути через `/` — переводим в разделитель ОС.
         let rel = entry.path.replace('/', std::path::MAIN_SEPARATOR_STR);
         let dest = install_dir.join(rel);
-        let file = entry.path.clone();
+        let label = friendly_label(entry.kind);
 
         let did = download::ensure_file(client, &entry.url, &dest, &entry.sha256, |d, t| {
             let _ = app.emit(
@@ -129,7 +194,7 @@ pub async fn sync_manifest(
                 SyncProgress {
                     index,
                     total,
-                    file: file.clone(),
+                    file: label.to_string(),
                     downloaded: d,
                     total_bytes: t,
                 },
@@ -175,13 +240,13 @@ pub async fn play(
         client,
         &install_dir,
         config::MINECRAFT_VERSION,
-        |index, total, name, downloaded, total_bytes| {
+        |index, total, _name, downloaded, total_bytes| {
             let _ = app.emit(
                 PROGRESS_EVENT,
                 SyncProgress {
                     index,
                     total,
-                    file: format!("Ваниль: {name}"),
+                    file: format!("Устанавливаем Minecraft {}", config::MINECRAFT_VERSION),
                     downloaded,
                     total_bytes,
                 },
@@ -204,7 +269,7 @@ pub async fn play(
             SyncProgress {
                 index: 0,
                 total: 1,
-                file: "Java Runtime".into(),
+                file: "Устанавливаем Java".into(),
                 downloaded: d,
                 total_bytes: t,
             },
@@ -222,12 +287,18 @@ pub async fn play(
         .neoforge_profile
         .clone()
         .ok_or_else(|| LauncherError::Other("в манифесте нет neoforge_profile".into()))?;
-    let pid = launch::launch(
-        &install_dir,
-        config::MINECRAFT_VERSION,
-        &profile,
-        &java_exe,
-        &player_name,
-    )?;
+    // launch блокирует поток (спавн + короткое ожидание раннего краха) —
+    // уносим в blocking-пул, чтобы не вешать async-исполнитель.
+    let pid = tokio::task::spawn_blocking(move || {
+        launch::launch(
+            &install_dir,
+            config::MINECRAFT_VERSION,
+            &profile,
+            &java_exe,
+            &player_name,
+        )
+    })
+    .await
+    .map_err(|e| LauncherError::Other(format!("задача запуска прервана: {e}")))??;
     Ok(pid)
 }

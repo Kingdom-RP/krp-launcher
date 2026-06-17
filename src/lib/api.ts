@@ -4,10 +4,24 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { openPath } from "@tauri-apps/plugin-opener";
+import { open as openDialog, confirm as confirmDialog } from "@tauri-apps/plugin-dialog";
 
 /** Открыть папку установки игры в системном проводнике. */
 export function openInstallDir(path: string): Promise<void> {
   return openPath(path);
+}
+
+/** Показать системный диалог выбора каталога установки.
+ *  Возвращает выбранный путь или `null`, если пользователь отменил выбор. */
+export async function pickInstallDir(defaultPath?: string): Promise<string | null> {
+  const selected = await openDialog({
+    directory: true,
+    multiple: false,
+    title: "Выберите папку для установки Kingdom RP",
+    defaultPath: defaultPath || undefined,
+  });
+  // directory:false multiple:false → string | null; здесь всегда string | null.
+  return typeof selected === "string" ? selected : null;
 }
 
 /** Результат проверки пути установки (paths.rs::PathValidation). */
@@ -41,9 +55,34 @@ export function defaultInstallDir(): Promise<string> {
   return invoke<string>("default_install_dir");
 }
 
+/** Папка установки для показа при старте: запомненная или по умолчанию. */
+export function getInstallDir(): Promise<string> {
+  return invoke<string>("get_install_dir");
+}
+
+/** Запомнить выбранную папку установки в настройках лаунчера. */
+export function setInstallDir(installDir: string): Promise<void> {
+  return invoke<void>("set_install_dir", { installDir });
+}
+
+/** Удалить установленную игру (миры/настройки игрока сохраняются). */
+export function uninstallGame(installDir: string): Promise<void> {
+  return invoke<void>("uninstall_game", { installDir });
+}
+
+/** Системный диалог подтверждения (да/нет). */
+export function confirmAction(message: string, title?: string): Promise<boolean> {
+  return confirmDialog(message, { title, kind: "warning" });
+}
+
 /** Проверить выбранный путь установки (включая права на запись). */
 export function validateInstallPath(path: string): Promise<PathValidation> {
   return invoke<PathValidation>("validate_install_path", { path });
+}
+
+/** Установлена ли уже игра в указанной папке (JRE + client.jar на месте). */
+export function isGameInstalled(installDir: string): Promise<boolean> {
+  return invoke<boolean>("is_game_installed", { installDir });
 }
 
 /** Синхронизировать файлы игры в указанную папку. */
