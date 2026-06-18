@@ -32,7 +32,7 @@ export interface PathValidation {
 
 /** Общий прогресс установки (progress.rs::ProgressPayload). */
 export interface SyncProgress {
-  /** Что сейчас делаем, напр. «Устанавливаем Minecraft 1.20.1». */
+  /** Что сейчас делаем, напр. «Устанавливаем Minecraft 1.21.1». */
   label: string;
   /** Скачано байт всего. */
   downloaded: number;

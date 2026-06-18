@@ -1,7 +1,7 @@
 //! Сборщик дистрибутива (способ Б) для лаунчера Kingdom RP.
 //!
 //! Что делает:
-//! 1. Скачивает NeoForge installer (`net.neoforged:forge:<mc>-<neo>`).
+//! 1. Скачивает NeoForge installer (`net.neoforged:neoforge:<neo>`, 1.21+).
 //! 2. Прогоняет его headless (`--installClient`) во временную папку — это
 //!    выполняет processors (патчинг клиента) и раскладывает `libraries/`
 //!    + version JSON.
@@ -79,7 +79,9 @@ fn main() -> Result<()> {
         cfg.work.display()
     );
 
-    let version_id = format!("{}-forge-{}", cfg.mc, cfg.neoforge);
+    // NeoForge 1.21+ ставит профиль как `neoforge-<ver>` (без mc в имени);
+    // на 1.20.1 это было `<mc>-forge-<ver>`.
+    let version_id = format!("neoforge-{}", cfg.neoforge);
     let profile_rel = format!("versions/{0}/{0}.json", version_id);
 
     if !cfg.skip_install {
@@ -140,7 +142,7 @@ fn main() -> Result<()> {
     fs::copy(&cfg.mod_jar, dist_mods.join(&mod_name))?;
     println!("мод: mods/{mod_name}");
 
-    // 4) JRE (Temurin 17) — снимки с Adoptium под каждую платформу, хостим у себя
+    // 4) JRE (Temurin 21) — снимки с Adoptium под каждую платформу, хостим у себя
     // с фикс. SHA-256. Windows = .zip, Linux = .tar.gz.
     let mut java = BTreeMap::new();
     if !cfg.skip_jre {
@@ -151,13 +153,13 @@ fn main() -> Result<()> {
         ];
         let http = reqwest::blocking::Client::builder().build()?;
         for (key, os, arch, ext) in platforms {
-            let rel = format!("java/jre17-{key}.{ext}");
+            let rel = format!("java/jre21-{key}.{ext}");
             let dest = dist.join(rel.replace('/', std::path::MAIN_SEPARATOR_STR));
             fs::create_dir_all(dest.parent().unwrap())?;
             let url = format!(
-                "https://api.adoptium.net/v3/binary/latest/17/ga/{os}/{arch}/jre/hotspot/normal/eclipse"
+                "https://api.adoptium.net/v3/binary/latest/21/ga/{os}/{arch}/jre/hotspot/normal/eclipse"
             );
-            println!("скачиваю Temurin 17 JRE ({key})…");
+            println!("скачиваю Temurin 21 JRE ({key})…");
             let bytes = http
                 .get(&url)
                 .send()
@@ -242,9 +244,10 @@ fn run_installer(cfg: &Config) -> Result<()> {
 
     let installer = cfg.work.join("installer.jar");
     if !installer.is_file() {
+        // NeoForge 1.21+: артефакт `net.neoforged:neoforge:<ver>` (без mc).
         let url = format!(
-            "https://maven.neoforged.net/releases/net/neoforged/forge/{0}-{1}/forge-{0}-{1}-installer.jar",
-            cfg.mc, cfg.neoforge
+            "https://maven.neoforged.net/releases/net/neoforged/neoforge/{0}/neoforge-{0}-installer.jar",
+            cfg.neoforge
         );
         println!("скачиваю установщик: {url}");
         let bytes = reqwest::blocking::Client::new()
@@ -297,8 +300,8 @@ fn sha256_file(path: &Path) -> Result<String> {
 }
 
 fn parse_args() -> Result<Config> {
-    let mut mc = "1.20.1".to_string();
-    let mut neoforge = "47.1.106".to_string();
+    let mut mc = "1.21.1".to_string();
+    let mut neoforge = "21.1.233".to_string();
     let mut base_url = "https://example.com/kingdomrp".to_string();
     let mut mod_jar = PathBuf::from("../../krp-mod/build/libs/kingdomrpcore-0.1.0.jar");
     let mut modpack_version = "1.0.0".to_string();
@@ -328,7 +331,7 @@ fn parse_args() -> Result<Config> {
             "--skip-install" => skip_install = true,
             "--skip-jre" => skip_jre = true,
             "-h" | "--help" => {
-                println!("krp-builder --base-url URL [--mod-jar PATH] [--mc 1.20.1] [--neoforge 47.1.106] [--version 1.0.0] [--out dist] [--work build-work] [--skip-install]");
+                println!("krp-builder --base-url URL [--mod-jar PATH] [--mc 1.21.1] [--neoforge 21.1.233] [--version 1.0.0] [--out dist] [--work build-work] [--skip-install]");
                 std::process::exit(0);
             }
             other => bail!("неизвестный аргумент: {other}"),

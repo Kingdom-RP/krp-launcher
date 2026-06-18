@@ -308,7 +308,7 @@ pub async fn ensure_vanilla(
 mod tests {
     use super::*;
 
-    /// Живой тест против Mojang: манифест → version JSON 1.20.1 → скачать
+    /// Живой тест против Mojang: манифест → version JSON 1.21.1 → скачать
     /// client.jar (проверка SHA-1) + распарсить индекс ассетов. Объекты
     /// ассетов (~300 МБ) НЕ качаем — проверяем механику ядра.
     /// `cargo test vanilla_resolver -- --ignored --nocapture`
@@ -317,9 +317,9 @@ mod tests {
     async fn vanilla_resolver() {
         let client = reqwest::Client::new();
         let manifest = fetch_version_manifest(&client).await.expect("manifest");
-        let url = find_version_url(&manifest, "1.20.1").expect("1.20.1 url");
+        let url = find_version_url(&manifest, "1.21.1").expect("1.21.1 url");
         let version = fetch_version_json(&client, url).await.expect("version json");
-        assert_eq!(version.id, "1.20.1");
+        assert_eq!(version.id, "1.21.1");
         assert!(!version.libraries.is_empty(), "ожидались библиотеки");
 
         let tmp = std::env::temp_dir().join("krp_vanilla_test");
@@ -346,7 +346,7 @@ mod tests {
             .unwrap();
         assert!(!index.objects.is_empty(), "ожидались объекты ассетов");
         eprintln!(
-            "OK: 1.20.1, libs={}, assets={}",
+            "OK: 1.21.1, libs={}, assets={}",
             version.libraries.len(),
             index.objects.len()
         );

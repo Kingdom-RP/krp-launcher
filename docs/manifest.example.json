@@ -1,10 +1,10 @@
 {
   "version": "1.0.0",
-  "minecraft": "1.20.1",
-  "neoforge": "47.1.106",
+  "minecraft": "1.21.1",
+  "neoforge": "21.1.233",
   "java": {
     "windows-x64": {
-      "url": "https://example.com/kingdomrp/java/OpenJDK17U-jre_x64_windows_hotspot_17.0.19_10.zip",
+      "url": "https://example.com/kingdomrp/java/jre21-windows-x64.zip",
       "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
       "size": 41943040,
       "dir": "runtime"
@@ -26,8 +26,8 @@
       "kind": "config"
     },
     {
-      "path": "libraries/net/neoforged/neoforge/47.1.106/neoforge-47.1.106-universal.jar",
-      "url": "https://example.com/kingdomrp/libraries/net/neoforged/neoforge/47.1.106/neoforge-47.1.106-universal.jar",
+      "path": "libraries/net/neoforged/neoforge/21.1.233/neoforge-21.1.233-universal.jar",
+      "url": "https://example.com/kingdomrp/libraries/net/neoforged/neoforge/21.1.233/neoforge-21.1.233-universal.jar",
       "sha256": "3333333333333333333333333333333333333333333333333333333333333333",
       "size": 2097152,
       "kind": "library"

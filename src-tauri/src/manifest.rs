@@ -16,12 +16,12 @@ pub struct Manifest {
     /// Версия профиля/модпака целиком (semver). Используется для проверки
     /// обновлений.
     pub version: String,
-    /// Целевая версия Minecraft, например `"1.20.1"`.
+    /// Целевая версия Minecraft, например `"1.21.1"`.
     pub minecraft: String,
     /// Целевая версия NeoForge.
     pub neoforge: String,
     /// Путь (относительно install_dir) к version JSON NeoForge — его читает
-    /// построитель команды запуска. Напр. `versions/1.20.1-forge-47.1.106/1.20.1-forge-47.1.106.json`.
+    /// построитель команды запуска. Напр. `versions/neoforge-21.1.233/neoforge-21.1.233.json`.
     #[serde(default)]
     pub neoforge_profile: Option<String>,
     /// JRE по платформам. Ключ — платформа, например `"windows-x64"`.

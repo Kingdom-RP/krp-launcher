@@ -1,15 +1,15 @@
-//! Построение команды запуска Minecraft + NeoForge (1.20.1) и старт процесса.
+//! Построение команды запуска Minecraft + NeoForge (1.21.1) и старт процесса.
 //!
 //! Алгоритм — стандартный для сторонних лаунчеров: NeoForge-профиль
 //! `inheritsFrom` ваниль, поэтому сливаем оба version JSON:
-//! - classpath = библиотеки NeoForge + ванильные (дедуп по group:artifact) +
-//!   ванильный `client.jar`;
+//! - classpath = библиотеки NeoForge + ванильные (дедуп по
+//!   group:artifact:classifier); ванильный `client.jar` НЕ добавляем;
 //! - mainClass — из NeoForge-профиля (`cpw.mods.bootstraplauncher.BootstrapLauncher`);
 //! - JVM- и game-аргументы — ванильные (только строковые, без rule-объектов —
 //!   они для опциональных фич) + NeoForge, с подстановкой плейсхолдеров.
 //!
-//! Патченый клиент (client-srg/extra, forge-client) НЕ кладём в classpath —
-//! modlauncher NeoForge находит их по `-DlibraryDirectory`.
+//! Патченый клиент (client-srg/extra) НЕ кладём в classpath — modlauncher
+//! NeoForge находит его по `-DlibraryDirectory`.
 //!
 //! Авторизация пока офлайн (фиктивные uuid/token); онлайн-вход — отдельная фаза.
 
@@ -164,7 +164,7 @@ fn substitute(arg: &str, vars: &[(&str, String)]) -> String {
 /// Собрать аргументы и запустить процесс игры. Возвращает PID.
 ///
 /// - `install_dir` — папка игры (содержит versions/libraries/assets/mods…)
-/// - `mc_version` — ванильная версия (напр. "1.20.1")
+/// - `mc_version` — ванильная версия (напр. "1.21.1")
 /// - `neoforge_profile_rel` — путь профиля NeoForge относительно install_dir
 /// - `java_exe` — путь к java
 /// - `player_name` — имя игрока (офлайн)
@@ -184,7 +184,7 @@ pub fn build_args(
     let forge = read_version(&forge_path)?;
 
     // ---- classpath: NeoForge-либы, затем ванильные библиотеки (дедуп) ----
-    // ВАЖНО: ванильный client.jar (`versions/1.20.1/1.20.1.jar`) в classpath НЕ
+    // ВАЖНО: ванильный client.jar (`versions/<mc>/<mc>.jar`) в classpath НЕ
     // добавляем. Патченый клиент NeoForge приходит модулем `minecraft` из
     // `libraries/.../client-…-srg.jar` (+ `client-…-extra.jar` с ресурсами),
     // которые modlauncher находит по `-DlibraryDirectory`. Если добавить и
@@ -383,8 +383,8 @@ mod tests {
         let install = Path::new(&dir);
         let args = build_args(
             install,
-            "1.20.1",
-            "versions/1.20.1-forge-47.1.106/1.20.1-forge-47.1.106.json",
+            "1.21.1",
+            "versions/neoforge-21.1.233/neoforge-21.1.233.json",
             "Tester",
         )
         .expect("build_args");

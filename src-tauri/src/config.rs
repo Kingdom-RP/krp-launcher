@@ -13,9 +13,9 @@ pub fn manifest_url() -> String {
 }
 
 /// Целевая версия Minecraft (ваниль тянется с Mojang по этой версии).
-pub const MINECRAFT_VERSION: &str = "1.20.1";
+pub const MINECRAFT_VERSION: &str = "1.21.1";
 
-/// Целевая версия NeoForge (артефакт `net.neoforged:forge:1.20.1-<NEOFORGE_VERSION>`).
+/// Целевая версия NeoForge (артефакт `net.neoforged:neoforge:<NEOFORGE_VERSION>`).
 /// Справочная константа (фактическую версию запуска лаунчер берёт из манифеста).
 #[allow(dead_code)]
-pub const NEOFORGE_VERSION: &str = "47.1.106";
+pub const NEOFORGE_VERSION: &str = "21.1.233";

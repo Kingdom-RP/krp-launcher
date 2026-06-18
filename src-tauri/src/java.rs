@@ -30,8 +30,8 @@ pub fn platform_key() -> &'static str {
     }
 }
 
-/// Требуемая мажорная версия Java (проект на Java 17 — см. CLAUDE.md).
-pub const JAVA_MAJOR: u32 = 17;
+/// Требуемая мажорная версия Java (проект на Java 21 — см. CLAUDE.md).
+pub const JAVA_MAJOR: u32 = 21;
 
 /// Достать мажорную версию Java из вывода `java -version` (Java печатает его в
 /// stderr), например `openjdk version "17.0.19"` → `17`. Понимает и старый
@@ -258,7 +258,7 @@ mod tests {
     #[tokio::test]
     #[ignore]
     async fn jre_pipeline() {
-        let url = "https://api.adoptium.net/v3/binary/latest/17/ga/windows/x64/jre/hotspot/normal/eclipse";
+        let url = "https://api.adoptium.net/v3/binary/latest/21/ga/windows/x64/jre/hotspot/normal/eclipse";
         let tmp = std::env::temp_dir().join("krp_jre_test");
         let _ = std::fs::remove_dir_all(&tmp);
         std::fs::create_dir_all(&tmp).unwrap();

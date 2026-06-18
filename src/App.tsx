@@ -304,7 +304,7 @@ function App() {
 
       <header className="hero">
         <h1 className="title">KINGDOM&nbsp;RP</h1>
-        <p className="subtitle">Minecraft 1.20.1 · NeoForge</p>
+        <p className="subtitle">Minecraft 1.21.1 · NeoForge</p>
       </header>
 
       <main className="panel">

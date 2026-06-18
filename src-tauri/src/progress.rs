@@ -18,7 +18,7 @@ pub const PROGRESS_EVENT: &str = "sync://progress";
 /// Полезная нагрузка события прогресса.
 #[derive(Debug, Clone, Serialize)]
 pub struct ProgressPayload {
-    /// Что сейчас делаем (например «Устанавливаем Minecraft 1.20.1»).
+    /// Что сейчас делаем (например «Устанавливаем Minecraft 1.21.1»).
     pub label: String,
     /// Скачано байт всего (с учётом уже имевшихся файлов).
     pub downloaded: u64,
