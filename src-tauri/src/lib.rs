@@ -225,6 +225,7 @@ async fn launch_game(
     player_name: String,
 ) -> Result<u32> {
     // launch блокирует поток (ожидание раннего краха) — в blocking-пул.
+    // Возвращаем только PID; дочерний процесс отпускаем (игра живёт сама).
     tokio::task::spawn_blocking(move || {
         launch::launch(
             Path::new(&install_dir),
@@ -233,6 +234,7 @@ async fn launch_game(
             Path::new(&java_exe),
             &player_name,
         )
+        .map(|child| child.id())
     })
     .await
     .map_err(|e| error::LauncherError::Other(format!("задача запуска прервана: {e}")))?

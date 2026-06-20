@@ -10,7 +10,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use serde::Serialize;
-use tauri::AppHandle;
+use tauri::{AppHandle, Emitter, Manager};
 
 use crate::error::{LauncherError, Result};
 use crate::progress::Progress;
@@ -246,7 +246,31 @@ async fn sync_all(
         log::info!("install: удалено посторонних файлов из mods: {pruned}");
     }
 
+    // Дефолтные настройки игры при первом запуске (язык RU, без онбординга
+    // Narrator'а) — только если игрок ещё не создавал свой options.txt.
+    ensure_default_options(install_dir);
+
     Ok(java_exe)
+}
+
+/// Событие «игра завершилась» — фронтенд по нему сбрасывает состояние, а окно
+/// лаунчера показывается обратно (см. [`play`]).
+pub const GAME_EXITED_EVENT: &str = "game://exited";
+
+/// Записать дефолтный `options.txt` (язык — русский, онбординг Narrator'а
+/// выключен), но ТОЛЬКО если файла ещё нет — чтобы не затирать настройки игрока.
+/// Minecraft при старте дочитает остальные ключи значениями по умолчанию.
+fn ensure_default_options(install_dir: &Path) {
+    let path = install_dir.join("options.txt");
+    if path.exists() {
+        return;
+    }
+    let content = "lang:ru_ru\nonboardAccessibility:false\n";
+    if let Err(e) = std::fs::write(&path, content) {
+        log::warn!("не удалось записать options.txt: {e}");
+    } else {
+        log::info!("создан дефолтный options.txt (lang:ru_ru)");
+    }
 }
 
 /// Установить игру без запуска: ваниль → JRE → файлы NeoForge/моды.
@@ -296,7 +320,7 @@ pub async fn play(
         .ok_or_else(|| LauncherError::Other("в манифесте нет neoforge_profile".into()))?;
     // launch блокирует поток (спавн + короткое ожидание раннего краха) —
     // уносим в blocking-пул, чтобы не вешать async-исполнитель.
-    let pid = tokio::task::spawn_blocking(move || {
+    let child = tokio::task::spawn_blocking(move || {
         launch::launch(
             &install_dir,
             config::MINECRAFT_VERSION,
@@ -307,5 +331,24 @@ pub async fn play(
     })
     .await
     .map_err(|e| LauncherError::Other(format!("задача запуска прервана: {e}")))??;
+    let pid = child.id();
+
+    // Прячем окно лаунчера на время игры и показываем обратно, когда игра
+    // закроется (плюс шлём событие, чтобы фронтенд сбросил состояние).
+    if let Some(win) = app.get_webview_window("main") {
+        let _ = win.hide();
+    }
+    let app_waiter = app.clone();
+    let mut child = child;
+    tokio::task::spawn_blocking(move || {
+        let _ = child.wait();
+        log::info!("play: игра закрыта (pid={pid}) — показываю лаунчер");
+        let _ = app_waiter.emit(GAME_EXITED_EVENT, ());
+        if let Some(win) = app_waiter.get_webview_window("main") {
+            let _ = win.unminimize();
+            let _ = win.show();
+            let _ = win.set_focus();
+        }
+    });
     Ok(pid)
 }

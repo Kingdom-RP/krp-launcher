@@ -5,9 +5,28 @@ import { relaunch } from "@tauri-apps/plugin-process";
 
 export type { Update };
 
-/** Проверить обновление лаунчера. `null` — обновлений нет. Бросает при ошибке сети/конфига. */
+/** Таймаут проверки обновления (мс). С российских IP сервер обновлений (GitHub
+ *  CDN) часто недоступен — без таймаута запрос «висит» бесконечно. */
+const CHECK_TIMEOUT_MS = 12000;
+
+function withTimeout<T>(p: Promise<T>, ms: number, message: string): Promise<T> {
+  return Promise.race([
+    p,
+    new Promise<T>((_, reject) =>
+      setTimeout(() => reject(new Error(message)), ms),
+    ),
+  ]);
+}
+
+/** Проверить обновление лаунчера. `null` — обновлений нет. Бросает при ошибке
+ *  сети/конфига или по таймауту (сервер обновлений недоступен). */
 export function checkUpdate(): Promise<Update | null> {
-  return check();
+  // timeout у плагина + жёсткий JS-таймаут на случай зависшего DNS/коннекта.
+  return withTimeout(
+    check({ timeout: CHECK_TIMEOUT_MS }),
+    CHECK_TIMEOUT_MS + 1000,
+    "Превышено время ожидания (сервер обновлений недоступен)",
+  );
 }
 
 /**

@@ -123,3 +123,11 @@ export function onSyncProgress(
 ): Promise<UnlistenFn> {
   return listen<SyncProgress>(PROGRESS_EVENT, (e) => cb(e.payload));
 }
+
+/** Событие «игра закрыта» (install.rs::GAME_EXITED_EVENT). */
+export const GAME_EXITED_EVENT = "game://exited";
+
+/** Подписаться на закрытие игры (бэкенд снова показывает окно лаунчера). */
+export function onGameExited(cb: () => void): Promise<UnlistenFn> {
+  return listen(GAME_EXITED_EVENT, () => cb());
+}

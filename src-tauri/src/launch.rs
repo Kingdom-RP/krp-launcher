@@ -291,7 +291,8 @@ fn read_log_tail(path: &Path, max_bytes: u64) -> String {
     buf
 }
 
-/// Собрать аргументы и запустить java. Возвращает PID процесса игры.
+/// Собрать аргументы и запустить java. Возвращает дочерний процесс игры (на
+/// нём можно `wait()` — чтобы показать лаунчер обратно при закрытии игры).
 ///
 /// stdout/stderr игры перенаправляются в `<install>/logs/latest-launch.log`
 /// (раньше java открывала отдельное окно консоли, которое мелькало и
@@ -305,7 +306,7 @@ pub fn launch(
     neoforge_profile_rel: &str,
     java_exe: &Path,
     player_name: &str,
-) -> Result<u32> {
+) -> Result<std::process::Child> {
     let cmd_args = build_args(install_dir, mc_version, neoforge_profile_rel, player_name)?;
 
     let logs_dir = install_dir.join("logs");
@@ -364,7 +365,7 @@ pub fn launch(
         Err(e) => log::warn!("launch: не удалось опросить статус процесса игры: {e}"),
     }
 
-    Ok(pid)
+    Ok(child)
 }
 
 #[cfg(test)]

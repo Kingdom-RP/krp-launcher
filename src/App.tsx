@@ -5,6 +5,7 @@ import {
   getPlayerName,
   installGame,
   isGameInstalled,
+  onGameExited,
   onSyncProgress,
   openInstallDir,
   pickInstallDir,
@@ -75,7 +76,6 @@ function App() {
   const [playerName, setPlayerName] = useState("");
   const [phase, setPhase] = useState<Phase>("idle");
   const [progress, setProgress] = useState<SyncProgress | null>(null);
-  const [pid, setPid] = useState<number | null>(null);
   const [errorMsg, setErrorMsg] = useState("");
 
   const [version, setVersion] = useState("");
@@ -129,11 +129,30 @@ function App() {
     };
   }, []);
 
-  // Проверка обновления лаунчера при старте (молча игнорируем ошибки сети/конфига).
+  // Игра закрыта → бэкенд показал окно лаунчера обратно; сбрасываем состояние.
+  useEffect(() => {
+    const unlisten = onGameExited(() => {
+      setPhase("idle");
+      setProgress(null);
+    });
+    return () => {
+      unlisten.then((fn) => fn());
+    };
+  }, []);
+
+  // Проверка обновления лаунчера при старте. Ошибку (часто — недоступность
+  // сервера обновлений с российских IP) показываем тостом, а не глотаем молча.
   useEffect(() => {
     checkUpdate()
       .then((u) => setUpdate(u))
-      .catch(() => {});
+      .catch((e) => {
+        logError(`UI: проверка обновления при старте не удалась: ${e}`);
+        pushToast(
+          "error",
+          "Не удалось проверить обновление — сервер обновлений недоступен",
+        );
+      });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Версия лаунчера для футера (из tauri.conf.json).
@@ -212,7 +231,6 @@ function App() {
     if (!ok) return;
     setPhase("idle");
     setErrorMsg("");
-    setPid(null);
     try {
       await uninstallGame(installDir);
       setInstalled(false);
@@ -228,7 +246,6 @@ function App() {
   async function onInstall() {
     setPhase("syncing");
     setErrorMsg("");
-    setPid(null);
     setProgress(null);
     logInfo(`UI: нажата «Установить» (путь=${installDir})`);
     try {
@@ -243,17 +260,16 @@ function App() {
     }
   }
 
-  // Запуск установленной игры (с докачкой обновлений).
+  // Запуск установленной игры (с докачкой обновлений). После успешного старта
+  // бэкенд прячет окно лаунчера; оно вернётся по событию onGameExited.
   async function onPlay() {
     setPhase("syncing");
     setErrorMsg("");
-    setPid(null);
     setProgress(null);
     logInfo(`UI: нажата «Играть» (игрок=${playerName.trim()}, путь=${installDir})`);
     try {
-      const launchedPid = await play(installDir, playerName.trim());
-      setPid(launchedPid);
-      setPhase("done");
+      await play(installDir, playerName.trim());
+      setPhase("idle");
       isGameInstalled(installDir).then(setInstalled).catch(() => {});
     } catch (e) {
       setErrorMsg(String(e));
@@ -379,13 +395,6 @@ function App() {
               {progress && progress.speed > 0 && ` · ${formatSpeed(progress.speed)}`}
             </span>
           </section>
-        )}
-
-        {/* Итог */}
-        {phase === "done" && pid != null && (
-          <p className="msg ok">
-            ✅ Игра запущена (PID {pid}). Лаунчер можно закрыть после загрузки игры.
-          </p>
         )}
 
         {/* Ошибка синхронизации */}
