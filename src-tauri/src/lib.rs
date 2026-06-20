@@ -1,3 +1,4 @@
+mod auth;
 mod config;
 mod download;
 mod error;
@@ -8,6 +9,7 @@ mod manifest;
 mod paths;
 mod progress;
 mod settings;
+mod skin;
 mod vanilla;
 
 use std::path::{Path, PathBuf};
@@ -73,6 +75,122 @@ fn set_player_name(app: tauri::AppHandle, player_name: String) -> Result<()> {
         Some(player_name)
     };
     settings::set_player_name(&app, value)
+}
+
+/// Текущий вошедший аккаунт (без секретов) + URL скина, или `null`.
+#[tauri::command]
+async fn auth_account(
+    app: tauri::AppHandle,
+    client: tauri::State<'_, reqwest::Client>,
+) -> Result<Option<auth::AccountInfo>> {
+    let Some(account) = settings::load(&app).account else {
+        return Ok(None);
+    };
+    let base = settings::auth_base_url(&app);
+    let skin = auth::skin_url(client.inner(), &base, &account).await.unwrap_or(None);
+    Ok(Some(account.info(skin)))
+}
+
+/// Регистрация нового аккаунта (логин/пароль) → сохранение сессии.
+#[tauri::command]
+async fn auth_register(
+    app: tauri::AppHandle,
+    client: tauri::State<'_, reqwest::Client>,
+    username: String,
+    password: String,
+) -> Result<auth::AccountInfo> {
+    let base = settings::auth_base_url(&app);
+    let account = auth::register(client.inner(), &base, &username, &password)
+        .await
+        .inspect_err(|e| log::error!("auth_register: {e}"))?;
+    settings::set_account(&app, Some(account.clone()))?;
+    Ok(account.info(None))
+}
+
+/// Вход существующего аккаунта → сохранение сессии.
+#[tauri::command]
+async fn auth_login(
+    app: tauri::AppHandle,
+    client: tauri::State<'_, reqwest::Client>,
+    username: String,
+    password: String,
+) -> Result<auth::AccountInfo> {
+    let base = settings::auth_base_url(&app);
+    let account = auth::login(client.inner(), &base, &username, &password)
+        .await
+        .inspect_err(|e| log::error!("auth_login: {e}"))?;
+    settings::set_account(&app, Some(account.clone()))?;
+    Ok(account.info(None))
+}
+
+/// Выйти из аккаунта (забыть сессию).
+#[tauri::command]
+fn auth_logout(app: tauri::AppHandle) -> Result<()> {
+    settings::set_account(&app, None)
+}
+
+/// Загрузить скин: проверяем PNG (64×64/64×32) и отправляем в drasl.
+#[tauri::command]
+async fn upload_skin(
+    app: tauri::AppHandle,
+    client: tauri::State<'_, reqwest::Client>,
+    path: String,
+    slim: bool,
+) -> Result<()> {
+    let bytes = std::fs::read(&path)
+        .map_err(|e| error::LauncherError::Other(format!("не прочитать файл: {e}")))?;
+    skin::validate_skin(&bytes)?; // отклоняем не-скины ещё до отправки
+    let account = settings::load(&app)
+        .account
+        .ok_or_else(|| error::LauncherError::Other("сначала войдите в аккаунт".into()))?;
+    let base = settings::auth_base_url(&app);
+    auth::upload_skin(client.inner(), &base, &account, &bytes, slim)
+        .await
+        .inspect_err(|e| log::error!("upload_skin: {e}"))
+}
+
+/// Проверить, что выбранный PNG — корректная развёртка скина Minecraft
+/// (64×64 или 64×32). Возвращает формат (`modern`/`legacy`) или ошибку с
+/// понятным игроку текстом. Используется перед загрузкой скина на auth-сервер.
+#[tauri::command]
+fn validate_skin(path: String) -> Result<skin::SkinFormat> {
+    skin::validate_skin_file(Path::new(&path))
+}
+
+fn png_data_url(bytes: &[u8]) -> String {
+    use base64::Engine;
+    format!(
+        "data:image/png;base64,{}",
+        base64::engine::general_purpose::STANDARD.encode(bytes)
+    )
+}
+
+/// Локальный PNG-скин → data-URL для превью (с валидацией формата). Так
+/// webview рисует картинку без проблем с доступом к файлу/CORS.
+#[tauri::command]
+fn skin_preview_file(path: String) -> Result<String> {
+    let bytes = std::fs::read(&path)
+        .map_err(|e| error::LauncherError::Other(format!("не прочитать файл: {e}")))?;
+    skin::validate_skin(&bytes)?;
+    Ok(png_data_url(&bytes))
+}
+
+/// Скачать скин по URL (с drasl) и вернуть data-URL — для превью текущего скина
+/// без CORS-ограничений webview.
+#[tauri::command]
+async fn skin_preview_url(
+    client: tauri::State<'_, reqwest::Client>,
+    url: String,
+) -> Result<String> {
+    let bytes = client
+        .inner()
+        .get(&url)
+        .send()
+        .await?
+        .error_for_status()?
+        .bytes()
+        .await?;
+    Ok(png_data_url(&bytes))
 }
 
 /// Открыть папку в системном файловом менеджере (Explorer / xdg-open).
@@ -233,6 +351,7 @@ async fn launch_game(
             &neoforge_profile,
             Path::new(&java_exe),
             &player_name,
+            None,
         )
         .map(|child| child.id())
     })
@@ -287,6 +406,14 @@ pub fn run() {
             get_player_name,
             set_player_name,
             open_dir,
+            validate_skin,
+            skin_preview_file,
+            skin_preview_url,
+            auth_account,
+            auth_register,
+            auth_login,
+            auth_logout,
+            upload_skin,
             is_game_installed,
             uninstall_game,
             validate_install_path,

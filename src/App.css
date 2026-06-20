@@ -286,6 +286,38 @@ button:disabled {
   transform: translateY(-1px);
 }
 
+/* Панель скина */
+.skin-panel {
+  display: flex;
+  gap: 1rem;
+  align-items: center;
+  padding: 0.6rem 0;
+}
+
+.skin-preview {
+  width: 180px;
+  height: 260px;
+  flex: none;
+  border-radius: 8px;
+  background: radial-gradient(circle at 50% 30%, rgba(200, 162, 74, 0.12), transparent 70%);
+}
+
+.skin-controls {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  flex: 1;
+}
+
+.skin-model {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.85rem;
+  color: var(--text-dim);
+  cursor: pointer;
+}
+
 /* Тосты-уведомления (правый нижний угол) */
 .toast-stack {
   position: fixed;

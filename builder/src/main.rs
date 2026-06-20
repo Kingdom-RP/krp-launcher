@@ -34,6 +34,8 @@ struct Manifest {
     neoforge: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     neoforge_profile: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    authlib_injector: Option<String>,
     java: BTreeMap<String, JavaEntry>,
     files: Vec<FileEntry>,
 }
@@ -65,6 +67,7 @@ struct Config {
     work: PathBuf,
     skip_install: bool,
     skip_jre: bool,
+    skip_authlib: bool,
 }
 
 fn main() -> Result<()> {
@@ -141,6 +144,39 @@ fn main() -> Result<()> {
     fs::create_dir_all(&dist_mods)?;
     fs::copy(&cfg.mod_jar, dist_mods.join(&mod_name))?;
     println!("мод: mods/{mod_name}");
+
+    // 3b) authlib-injector.jar — Java-агент авторизации (фаза 6). Хостим у себя
+    // (его релизы на GitHub в РФ режутся); качаем с официального maven yushi.moe.
+    let authlib_injector = if cfg.skip_authlib {
+        println!("--skip-authlib: authlib-injector не добавлен");
+        None
+    } else {
+        let http = reqwest::blocking::Client::new();
+        let meta_text = http
+            .get("https://authlib-injector.yushi.moe/artifact/latest.json")
+            .send()
+            .context("запрос метаданных authlib-injector")?
+            .error_for_status()?
+            .text()?;
+        let meta: serde_json::Value = serde_json::from_str(&meta_text)
+            .context("разбор latest.json authlib-injector")?;
+        let url = meta["download_url"]
+            .as_str()
+            .ok_or_else(|| anyhow!("нет download_url в latest.json authlib-injector"))?;
+        let bytes = http
+            .get(url)
+            .send()
+            .context("скачивание authlib-injector.jar")?
+            .error_for_status()?
+            .bytes()?;
+        fs::write(dist.join("authlib-injector.jar"), &bytes)?;
+        println!(
+            "authlib-injector.jar: {} ({} КБ)",
+            meta["version"].as_str().unwrap_or("?"),
+            bytes.len() / 1024
+        );
+        Some("authlib-injector.jar".to_string())
+    };
 
     // 4) JRE (Temurin 21) — снимки с Adoptium под каждую платформу, хостим у себя
     // с фикс. SHA-256. Windows = .zip, Linux = .tar.gz.
@@ -223,6 +259,7 @@ fn main() -> Result<()> {
         minecraft: cfg.mc.clone(),
         neoforge: cfg.neoforge.clone(),
         neoforge_profile: Some(profile_rel),
+        authlib_injector,
         java,
         files,
     };
@@ -309,6 +346,7 @@ fn parse_args() -> Result<Config> {
     let mut work = PathBuf::from("build-work");
     let mut skip_install = false;
     let mut skip_jre = false;
+    let mut skip_authlib = false;
 
     let mut args = std::env::args().skip(1);
     while let Some(a) = args.next() {
@@ -330,6 +368,7 @@ fn parse_args() -> Result<Config> {
             "--work" => work = PathBuf::from(args.next().ok_or_else(|| anyhow!("--work requires value"))?),
             "--skip-install" => skip_install = true,
             "--skip-jre" => skip_jre = true,
+            "--skip-authlib" => skip_authlib = true,
             "-h" | "--help" => {
                 println!("krp-builder --base-url URL [--mod-jar PATH] [--mc 1.21.1] [--neoforge 21.1.233] [--version 1.0.0] [--out dist] [--work build-work] [--skip-install]");
                 std::process::exit(0);
@@ -348,5 +387,6 @@ fn parse_args() -> Result<Config> {
         work,
         skip_install,
         skip_jre,
+        skip_authlib,
     })
 }

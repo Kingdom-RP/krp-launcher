@@ -23,6 +23,60 @@ export async function pickInstallDir(defaultPath?: string): Promise<string | nul
   return typeof selected === "string" ? selected : null;
 }
 
+/** Аккаунт игрока (auth.rs::AccountInfo). */
+export interface AccountInfo {
+  username: string;
+  player_name: string;
+  uuid: string;
+  skin_url: string | null;
+}
+
+/** Текущий вошедший аккаунт или `null`. */
+export function authAccount(): Promise<AccountInfo | null> {
+  return invoke<AccountInfo | null>("auth_account");
+}
+
+/** Регистрация нового аккаунта (логин/пароль). */
+export function authRegister(username: string, password: string): Promise<AccountInfo> {
+  return invoke<AccountInfo>("auth_register", { username, password });
+}
+
+/** Вход существующего аккаунта. */
+export function authLogin(username: string, password: string): Promise<AccountInfo> {
+  return invoke<AccountInfo>("auth_login", { username, password });
+}
+
+/** Выйти из аккаунта. */
+export function authLogout(): Promise<void> {
+  return invoke<void>("auth_logout");
+}
+
+/** Загрузить скин (PNG уже валидируется на бэкенде). `slim` — тонкая модель. */
+export function uploadSkin(path: string, slim: boolean): Promise<void> {
+  return invoke<void>("upload_skin", { path, slim });
+}
+
+/** Диалог выбора PNG-скина. `null`, если игрок отменил. */
+export async function pickSkinFile(): Promise<string | null> {
+  const sel = await openDialog({
+    multiple: false,
+    directory: false,
+    title: "Выберите PNG-скин (64×64)",
+    filters: [{ name: "PNG-скин", extensions: ["png"] }],
+  });
+  return typeof sel === "string" ? sel : null;
+}
+
+/** Локальный PNG → data-URL (валидирует формат) для превью. */
+export function skinPreviewFile(path: string): Promise<string> {
+  return invoke<string>("skin_preview_file", { path });
+}
+
+/** Скин по URL (drasl) → data-URL для превью без CORS. */
+export function skinPreviewUrl(url: string): Promise<string> {
+  return invoke<string>("skin_preview_url", { url });
+}
+
 /** Результат проверки пути установки (paths.rs::PathValidation). */
 export interface PathValidation {
   valid: boolean;

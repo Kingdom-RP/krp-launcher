@@ -14,7 +14,7 @@ use tauri::{AppHandle, Emitter, Manager};
 
 use crate::error::{LauncherError, Result};
 use crate::progress::Progress;
-use crate::{config, download, java, launch, manifest, vanilla};
+use crate::{auth, config, download, java, launch, manifest, settings, vanilla};
 
 /// Итог синхронизации файлов манифеста.
 #[derive(Debug, Clone, Serialize)]
@@ -318,15 +318,55 @@ pub async fn play(
         .neoforge_profile
         .clone()
         .ok_or_else(|| LauncherError::Other("в манифесте нет neoforge_profile".into()))?;
+
+    // Авторизация: если игрок вошёл (drasl) и в манифесте есть authlib-injector —
+    // запускаем онлайн (реальные токены + javaagent); иначе офлайн.
+    let base = settings::auth_base_url(app);
+    let online_data: Option<(String, String, String, PathBuf, String)> =
+        match settings::load(app).account {
+            Some(mut account) => match manifest.authlib_injector.as_deref() {
+                Some(rel) => {
+                    auth::ensure_session(client, &base, &mut account).await?;
+                    let _ = settings::set_account(app, Some(account.clone()));
+                    let injector =
+                        install_dir.join(rel.replace('/', std::path::MAIN_SEPARATOR_STR));
+                    let api_url = format!("{}/authlib-injector", base.trim_end_matches('/'));
+                    log::info!("play: онлайн-запуск как '{}'", account.player_name);
+                    Some((
+                        account.player_name,
+                        account.mc_uuid,
+                        account.access_token,
+                        injector,
+                        api_url,
+                    ))
+                }
+                None => {
+                    log::warn!("play: в манифесте нет authlib_injector — запуск офлайн");
+                    None
+                }
+            },
+            None => None,
+        };
+
     // launch блокирует поток (спавн + короткое ожидание раннего краха) —
     // уносим в blocking-пул, чтобы не вешать async-исполнитель.
     let child = tokio::task::spawn_blocking(move || {
+        let online = online_data.as_ref().map(|(u, uuid, token, inj, api)| {
+            launch::OnlineAuth {
+                username: u,
+                uuid,
+                access_token: token,
+                injector_jar: inj.as_path(),
+                api_url: api,
+            }
+        });
         launch::launch(
             &install_dir,
             config::MINECRAFT_VERSION,
             &profile,
             &java_exe,
             &player_name,
+            online.as_ref(),
         )
     })
     .await

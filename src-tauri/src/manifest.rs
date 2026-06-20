@@ -24,6 +24,10 @@ pub struct Manifest {
     /// построитель команды запуска. Напр. `versions/neoforge-21.1.233/neoforge-21.1.233.json`.
     #[serde(default)]
     pub neoforge_profile: Option<String>,
+    /// Путь (относительно install_dir) к `authlib-injector.jar` — Java-агент
+    /// авторизации (фаза 6). Напр. `authlib-injector.jar`.
+    #[serde(default)]
+    pub authlib_injector: Option<String>,
     /// JRE по платформам. Ключ — платформа, например `"windows-x64"`.
     #[serde(default)]
     pub java: HashMap<String, JavaEntry>,

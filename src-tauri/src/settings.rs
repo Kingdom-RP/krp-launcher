@@ -18,9 +18,15 @@ pub struct Settings {
     /// Папка, куда установлена игра (если игрок её выбирал/устанавливал).
     #[serde(default)]
     pub install_dir: Option<String>,
-    /// Последний введённый никнейм игрока.
+    /// Последний введённый никнейм игрока (офлайн-режим, до фазы 6).
     #[serde(default)]
     pub player_name: Option<String>,
+    /// Авторизованный аккаунт (drasl), если игрок вошёл (фаза 6).
+    #[serde(default)]
+    pub account: Option<crate::auth::Account>,
+    /// Необязательный оверрайд адреса auth-сервера (для теста без пересборки).
+    #[serde(default)]
+    pub auth_base_url: Option<String>,
 }
 
 fn settings_path(app: &AppHandle) -> Result<PathBuf> {
@@ -65,4 +71,18 @@ pub fn set_player_name(app: &AppHandle, name: Option<String>) -> Result<()> {
     let mut s = load(app);
     s.player_name = name;
     save(app, &s)
+}
+
+/// Сохранить/очистить авторизованный аккаунт.
+pub fn set_account(app: &AppHandle, account: Option<crate::auth::Account>) -> Result<()> {
+    let mut s = load(app);
+    s.account = account;
+    save(app, &s)
+}
+
+/// Адрес auth-сервера: оверрайд из настроек или константа из конфига.
+pub fn auth_base_url(app: &AppHandle) -> String {
+    load(app)
+        .auth_base_url
+        .unwrap_or_else(|| crate::config::AUTH_BASE_URL.to_string())
 }

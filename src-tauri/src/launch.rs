@@ -161,18 +161,34 @@ fn substitute(arg: &str, vars: &[(&str, String)]) -> String {
     out
 }
 
+/// Реальные данные авторизации для онлайн-запуска (фаза 6, drasl). Если задано —
+/// в команду добавляется `-javaagent:authlib-injector.jar=<api_url>` и реальные
+/// `--username/--uuid/--accessToken`; иначе запуск офлайн.
+pub struct OnlineAuth<'a> {
+    pub username: &'a str,
+    /// UUID без дефисов (как `selectedProfile.id`).
+    pub uuid: &'a str,
+    pub access_token: &'a str,
+    /// Путь к `authlib-injector.jar`.
+    pub injector_jar: &'a Path,
+    /// URL метаданных authlib-injector (`<base>/authlib-injector`).
+    pub api_url: &'a str,
+}
+
 /// Собрать аргументы и запустить процесс игры. Возвращает PID.
 ///
 /// - `install_dir` — папка игры (содержит versions/libraries/assets/mods…)
 /// - `mc_version` — ванильная версия (напр. "1.21.1")
 /// - `neoforge_profile_rel` — путь профиля NeoForge относительно install_dir
 /// - `java_exe` — путь к java
-/// - `player_name` — имя игрока (офлайн)
+/// - `player_name` — имя игрока (офлайн-фолбэк, если `online` = None)
+/// - `online` — реальная авторизация (drasl) или `None` для офлайн-запуска
 pub fn build_args(
     install_dir: &Path,
     mc_version: &str,
     neoforge_profile_rel: &str,
     player_name: &str,
+    online: Option<&OnlineAuth>,
 ) -> Result<Vec<String>> {
     let vanilla_path = install_dir
         .join("versions")
@@ -226,6 +242,12 @@ pub fn build_args(
     let natives_dir = install_dir.join("natives");
     std::fs::create_dir_all(&natives_dir).ok();
 
+    // Данные авторизации: реальные из drasl (online) либо офлайн-заглушки.
+    let (auth_name, auth_uuid, auth_token) = match online {
+        Some(a) => (a.username.to_string(), a.uuid.to_string(), a.access_token.to_string()),
+        None => (player_name.to_string(), offline_uuid(player_name), "0".to_string()),
+    };
+
     let vars: Vec<(&str, String)> = vec![
         ("classpath", classpath),
         ("classpath_separator", sep.to_string()),
@@ -237,9 +259,9 @@ pub fn build_args(
         ("game_directory", install_dir.to_string_lossy().into_owned()),
         ("assets_root", install_dir.join("assets").to_string_lossy().into_owned()),
         ("assets_index_name", assets_index),
-        ("auth_player_name", player_name.into()),
-        ("auth_uuid", offline_uuid(player_name)),
-        ("auth_access_token", "0".into()),
+        ("auth_player_name", auth_name),
+        ("auth_uuid", auth_uuid),
+        ("auth_access_token", auth_token),
         ("clientid", String::new()),
         ("auth_xuid", String::new()),
         ("user_type", "msa".into()),
@@ -263,6 +285,14 @@ pub fn build_args(
     // JVM: ваниль + NeoForge.
     cmd_args.extend(collect_str(&vanilla.arguments, |a| &a.jvm));
     cmd_args.extend(collect_str(&forge.arguments, |a| &a.jvm));
+    // authlib-injector (онлайн-авторизация) — Java-агент, до main class.
+    if let Some(a) = online {
+        cmd_args.push(format!(
+            "-javaagent:{}={}",
+            a.injector_jar.display(),
+            a.api_url
+        ));
+    }
     // main class — из NeoForge.
     let main_class = forge
         .main_class
@@ -306,8 +336,9 @@ pub fn launch(
     neoforge_profile_rel: &str,
     java_exe: &Path,
     player_name: &str,
+    online: Option<&OnlineAuth>,
 ) -> Result<std::process::Child> {
-    let cmd_args = build_args(install_dir, mc_version, neoforge_profile_rel, player_name)?;
+    let cmd_args = build_args(install_dir, mc_version, neoforge_profile_rel, player_name, online)?;
 
     let logs_dir = install_dir.join("logs");
     std::fs::create_dir_all(&logs_dir).ok();
@@ -387,6 +418,7 @@ mod tests {
             "1.21.1",
             "versions/neoforge-21.1.233/neoforge-21.1.233.json",
             "Tester",
+            None,
         )
         .expect("build_args");
         let joined = args.join(" ");

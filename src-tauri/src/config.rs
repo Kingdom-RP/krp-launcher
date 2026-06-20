@@ -12,6 +12,12 @@ pub fn manifest_url() -> String {
     format!("{MANIFEST_BASE_URL}/manifest.json")
 }
 
+/// База auth-сервера (drasl, Yggdrasil-совместимый). Сейчас — локальный dev-инстанс;
+/// при выезде на публичный сервер меняем здесь (или оверрайдим через
+/// `settings.json` → `auth_base_url` для теста без пересборки). Отсюда же строится
+/// URL для `authlib-injector` (`<base>/authlib-injector`).
+pub const AUTH_BASE_URL: &str = "http://localhost:25585";
+
 /// Целевая версия Minecraft (ваниль тянется с Mojang по этой версии).
 pub const MINECRAFT_VERSION: &str = "1.21.1";
 
