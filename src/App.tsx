@@ -1,7 +1,6 @@
 import { useEffect, useState } from "react";
 import {
   authAccount,
-  authLogout,
   confirmAction,
   getInstallDir,
   installGame,
@@ -153,15 +152,6 @@ function App() {
       .finally(() => setAuthChecked(true));
   }, []);
 
-  async function onLogout() {
-    try {
-      await authLogout();
-      setAccount(null);
-      logInfo("UI: выход из аккаунта");
-    } catch (e) {
-      logError(`UI: ошибка выхода: ${e}`);
-    }
-  }
 
   async function onUpdateLauncher() {
     if (!update) return;
@@ -330,18 +320,11 @@ function App() {
         </section>
 
         {/* Аккаунт игрока */}
-        <section className="row path-row">
+        <section className="row">
           <div className="path-info">
             <span className="label">Аккаунт</span>
             <span className="path-value">{account.player_name}</span>
           </div>
-          <button
-            className="ghost"
-            disabled={phase === "syncing"}
-            onClick={onLogout}
-          >
-            Выйти
-          </button>
         </section>
 
         {/* Скин: 3D-превью + загрузка */}

@@ -95,6 +95,7 @@ pub async fn ensure_java(
     install_dir: &Path,
     entry: &JavaEntry,
     progress: &Progress,
+    verb: &str,
 ) -> Result<PathBuf> {
     let java_exe = java_exe_path(install_dir, &entry.dir);
     let runtime = install_dir.join(&entry.dir);
@@ -112,7 +113,7 @@ pub async fn ensure_java(
         let _ = tokio::fs::remove_dir_all(&runtime).await;
     }
 
-    progress.set_label("Устанавливаем Java");
+    progress.set_label(format!("{verb} Java"));
     // Adoptium: Windows = .zip, Linux/macOS = .tar.gz. Тип берём из имени файла.
     let is_tgz = entry.url.ends_with(".tar.gz") || entry.url.ends_with(".tgz");
     let archive = install_dir.join(format!(

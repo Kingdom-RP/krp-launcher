@@ -7,7 +7,7 @@ export type { Update };
 
 /** Таймаут проверки обновления (мс). С российских IP сервер обновлений (GitHub
  *  CDN) часто недоступен — без таймаута запрос «висит» бесконечно. */
-const CHECK_TIMEOUT_MS = 12000;
+const CHECK_TIMEOUT_MS = 5000;
 
 function withTimeout<T>(p: Promise<T>, ms: number, message: string): Promise<T> {
   return Promise.race([

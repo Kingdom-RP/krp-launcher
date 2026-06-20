@@ -187,6 +187,7 @@ pub async fn ensure_vanilla(
     install_dir: &Path,
     version_id: &str,
     progress: &Progress,
+    verb: &str,
 ) -> Result<()> {
     let manifest = fetch_version_manifest(client).await?;
     let mv = manifest
@@ -237,7 +238,7 @@ pub async fn ensure_vanilla(
         vanilla_total += object.size;
     }
     progress.add_total(vanilla_total);
-    progress.set_label(format!("Устанавливаем Minecraft {}", config::MINECRAFT_VERSION));
+    progress.set_label(format!("{verb} Minecraft {}", config::MINECRAFT_VERSION));
 
     // 1. client.jar
     let client_jar = install_dir

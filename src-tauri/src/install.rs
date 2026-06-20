@@ -24,14 +24,17 @@ pub struct SyncSummary {
     pub skipped: usize,
 }
 
-/// Понятная игроку подпись этапа по типу файла (для UI-прогресса).
-fn friendly_label(kind: manifest::FileKind) -> &'static str {
-    match kind {
-        manifest::FileKind::Mod => "Устанавливаем моды Kingdom RP",
-        manifest::FileKind::Library | manifest::FileKind::Client => "Устанавливаем NeoForge",
-        manifest::FileKind::Config => "Устанавливаем конфигурацию",
-        manifest::FileKind::Asset => "Устанавливаем ресурсы",
-    }
+/// Понятная игроку подпись этапа по типу файла (для UI-прогресса). `verb` —
+/// «Устанавливаем» при первой установке или «Проверяем» при запуске уже
+/// установленной игры (тогда это сверка/докачка, а не установка).
+fn friendly_label(kind: manifest::FileKind, verb: &str) -> String {
+    let noun = match kind {
+        manifest::FileKind::Mod => "моды Kingdom RP",
+        manifest::FileKind::Library | manifest::FileKind::Client => "NeoForge",
+        manifest::FileKind::Config => "конфигурацию",
+        manifest::FileKind::Asset => "ресурсы",
+    };
+    format!("{verb} {noun}")
 }
 
 /// Грубая проверка «игра установлена»: распакованная JRE + ванильный client.jar
@@ -102,7 +105,7 @@ pub async fn ensure_java(
     };
     let progress = Progress::new(app.clone());
     progress.add_total(entry.size);
-    let java_exe = java::ensure_java(client, &install_dir, entry, &progress).await?;
+    let java_exe = java::ensure_java(client, &install_dir, entry, &progress, "Устанавливаем").await?;
     Ok(Some(java_exe.to_string_lossy().into_owned()))
 }
 
@@ -113,7 +116,8 @@ pub async fn ensure_vanilla(
     install_dir: PathBuf,
 ) -> Result<()> {
     let progress = Progress::new(app.clone());
-    vanilla::ensure_vanilla(client, &install_dir, config::MINECRAFT_VERSION, &progress).await
+    vanilla::ensure_vanilla(client, &install_dir, config::MINECRAFT_VERSION, &progress, "Устанавливаем")
+        .await
 }
 
 /// Синхронизировать все файлы манифеста в `install_dir` (сам тянет манифест).
@@ -125,16 +129,18 @@ pub async fn sync_files(
     let manifest = manifest::fetch_manifest(client, &config::manifest_url()).await?;
     let progress = Progress::new(app.clone());
     progress.add_total(manifest.files.iter().map(|f| f.size).sum());
-    sync_manifest(client, &install_dir, &manifest, &progress).await
+    sync_manifest(client, &install_dir, &manifest, &progress, "Проверяем").await
 }
 
 /// Докачать файлы уже полученного манифеста, отчитываясь в общий трекер.
 /// Размеры файлов должны быть уже добавлены в `progress.add_total` вызывающим.
+/// `verb` — «Устанавливаем» (первая установка) или «Проверяем» (запуск).
 pub async fn sync_manifest(
     client: &reqwest::Client,
     install_dir: &Path,
     manifest: &manifest::Manifest,
     progress: &Progress,
+    verb: &str,
 ) -> Result<SyncSummary> {
     let total = manifest.files.len();
     let mut downloaded = 0usize;
@@ -144,7 +150,7 @@ pub async fn sync_manifest(
         // В манифесте пути через `/` — переводим в разделитель ОС.
         let rel = entry.path.replace('/', std::path::MAIN_SEPARATOR_STR);
         let dest = install_dir.join(rel);
-        progress.set_label(friendly_label(entry.kind));
+        progress.set_label(friendly_label(entry.kind, verb));
 
         let did = download::ensure_file(client, &entry.url, &dest, &entry.sha256, progress.file_cb())
             .await?;
@@ -215,6 +221,7 @@ async fn sync_all(
     install_dir: &Path,
     manifest: &manifest::Manifest,
     progress: &Progress,
+    verb: &str,
 ) -> Result<PathBuf> {
     // Объём файлов манифеста (NeoForge + моды) знаем заранее.
     progress.add_total(manifest.files.iter().map(|f| f.size).sum());
@@ -230,15 +237,15 @@ async fn sync_all(
     // 1. Ваниль с Mojang (client.jar + библиотеки + ассеты). Сама добавит свой
     //    объём в общий трекер.
     log::info!("install: [1/3] ваниль с Mojang ({})", config::MINECRAFT_VERSION);
-    vanilla::ensure_vanilla(client, install_dir, config::MINECRAFT_VERSION, progress).await?;
+    vanilla::ensure_vanilla(client, install_dir, config::MINECRAFT_VERSION, progress, verb).await?;
 
     // 2. JRE из манифеста.
     log::info!("install: [2/3] JRE ({})", java::platform_key());
-    let java_exe = java::ensure_java(client, install_dir, java_entry, progress).await?;
+    let java_exe = java::ensure_java(client, install_dir, java_entry, progress, verb).await?;
 
     // 3. Файлы NeoForge + моды.
     log::info!("install: [3/3] синхронизация файлов NeoForge + моды");
-    sync_manifest(client, install_dir, manifest, progress).await?;
+    sync_manifest(client, install_dir, manifest, progress, verb).await?;
 
     // Анти-чит: убираем из mods всё, чего нет в манифесте.
     let pruned = prune_mods(install_dir, manifest)?;
@@ -258,18 +265,19 @@ async fn sync_all(
 pub const GAME_EXITED_EVENT: &str = "game://exited";
 
 /// Записать дефолтный `options.txt` (язык — русский, онбординг Narrator'а
-/// выключен), но ТОЛЬКО если файла ещё нет — чтобы не затирать настройки игрока.
-/// Minecraft при старте дочитает остальные ключи значениями по умолчанию.
+/// выключен, масштаб интерфейса = 2), но ТОЛЬКО если файла ещё нет — чтобы не
+/// затирать настройки игрока. Minecraft при старте дочитает остальные ключи
+/// значениями по умолчанию.
 fn ensure_default_options(install_dir: &Path) {
     let path = install_dir.join("options.txt");
     if path.exists() {
         return;
     }
-    let content = "lang:ru_ru\nonboardAccessibility:false\n";
+    let content = "lang:ru_ru\nonboardAccessibility:false\nguiScale:2\n";
     if let Err(e) = std::fs::write(&path, content) {
         log::warn!("не удалось записать options.txt: {e}");
     } else {
-        log::info!("создан дефолтный options.txt (lang:ru_ru)");
+        log::info!("создан дефолтный options.txt (lang:ru_ru, guiScale:2)");
     }
 }
 
@@ -288,7 +296,7 @@ pub async fn install_only(
         manifest.files.len()
     );
     let progress = Arc::new(Progress::new(app.clone()));
-    sync_all(client, &install_dir, &manifest, &progress).await?;
+    sync_all(client, &install_dir, &manifest, &progress, "Устанавливаем").await?;
     Ok(())
 }
 
@@ -310,7 +318,8 @@ pub async fn play(
     );
 
     let progress = Arc::new(Progress::new(app.clone()));
-    let java_exe = sync_all(client, &install_dir, &manifest, &progress).await?;
+    // Игра уже установлена (кнопка «Играть») — это сверка/докачка, не установка.
+    let java_exe = sync_all(client, &install_dir, &manifest, &progress, "Проверяем").await?;
 
     // Запуск игры.
     log::info!("play: запуск игры");
