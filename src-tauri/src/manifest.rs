@@ -73,12 +73,20 @@ pub enum FileKind {
     Client,
 }
 
-/// Скачать и разобрать манифест по URL.
+/// Скачать и разобрать манифест по URL. Манифест маленький — ограничиваем
+/// время запроса (источник на GitHub Pages с российских IP бывает недоступен).
 pub async fn fetch_manifest(client: &reqwest::Client, url: &str) -> Result<Manifest> {
     let manifest = client
         .get(url)
+        .timeout(std::time::Duration::from_secs(20))
         .send()
-        .await?
+        .await
+        .map_err(|e| {
+            crate::error::LauncherError::Other(format!(
+                "Не удалось получить manifest.json ({url}). Возможно, источник \
+                 (GitHub) недоступен с вашего интернета. Подробности: {e}"
+            ))
+        })?
         .error_for_status()?
         .json::<Manifest>()
         .await?;

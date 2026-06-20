@@ -309,7 +309,6 @@ function App() {
 
       <header className="hero">
         <h1 className="title">KINGDOM&nbsp;RP</h1>
-        <p className="subtitle">Minecraft 1.21.1 · NeoForge</p>
       </header>
 
       <main className="panel">
@@ -405,9 +404,11 @@ function App() {
       </main>
 
       <footer className="footer">
-        <span>Kingdom RP Launcher</span>
+        <span className="footer-left">
+          Kingdom RP Launcher
+          {version && <span className="version">v{version}</span>}
+        </span>
         <div className="footer-right">
-          <span className="version">{version ? `v${version}` : ""}</span>
           {installed && (
             <button
               className="folder-btn"

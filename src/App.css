@@ -131,6 +131,12 @@ body {
   line-height: 1.35;
   padding: 0.5rem 0.7rem;
   border-radius: 6px;
+  /* Текст ошибок/сообщений можно выделять и копировать (глобально выделение
+     отключено через body { user-select: none }). */
+  user-select: text;
+  cursor: text;
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
 .msg.error {
@@ -264,7 +270,13 @@ button:disabled {
   font-size: 0.8rem;
 }
 
-/* Футер: версия + кнопка-папка справа */
+/* Футер: название + версия слева, кнопки справа */
+.footer-left {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+}
+
 .footer-right {
   display: flex;
   align-items: center;
@@ -337,6 +349,8 @@ button:disabled {
   font-size: 0.85rem;
   line-height: 1.3;
   color: var(--text);
+  user-select: text;
+  pointer-events: auto;
   background: var(--bg-2);
   border: 1px solid rgba(255, 255, 255, 0.12);
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);

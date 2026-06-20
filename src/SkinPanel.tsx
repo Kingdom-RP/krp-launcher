@@ -104,7 +104,7 @@ export function SkinPanel({
             disabled={disabled || busy}
             onChange={(e) => setSlim(e.currentTarget.checked)}
           />
-          Тонкая модель (Alex)
+          Тонкая модель
         </label>
         <button className="ghost" disabled={disabled || busy} onClick={onPick}>
           Выбрать PNG…

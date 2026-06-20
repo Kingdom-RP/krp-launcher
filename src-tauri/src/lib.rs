@@ -396,7 +396,16 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
-        .manage(reqwest::Client::new())
+        // connect_timeout — чтобы при недоступном источнике (с российских IP
+        // GitHub Pages часто блокируется) запрос падал за ~15с, а не висел долго.
+        // Это таймаут только на установление соединения — большие загрузки
+        // (JRE/ассеты) он не обрывает.
+        .manage(
+            reqwest::Client::builder()
+                .connect_timeout(std::time::Duration::from_secs(15))
+                .build()
+                .expect("не удалось создать HTTP-клиент"),
+        )
         .invoke_handler(tauri::generate_handler![
             greet,
             default_install_dir,
