@@ -216,6 +216,25 @@ JRE под **каждую платформу** (windows-x64 .zip + linux-x64 .ta
 `dist/` заливается на источник (`--base-url`).
 Флаги: `--skip-install` (переиспользовать `--work`), `--skip-jre`.
 
+**Сторонние моды.** Их jar'ы НЕ перехостятся в `dist`: лежат в отдельном источнике
+(Releases репо `krp-modpack`). Сборщик дописывает их в `manifest.json` как
+`FileEntry` с **внешним** url (не base_url); лаунчер качает их напрямую в `mods/`
+и сверяет хеш; `prune_mods` их не трогает (они в манифесте). Два источника
+(можно вместе, при совпадении пути приоритет у modlist):
+- **`--mods-release owner/repo [--mods-tag v1]`** — авто: читает ассеты Release
+  через GitHub API, качает каждый `.jar`, считает SHA-256, url = ассет Release.
+  Ничего вручную вписывать не надо — «залил jar в Release → пересборка → готово».
+  `GH_TOKEN`/`GITHUB_TOKEN` — против лимита API (в GitHub Actions есть из коробки).
+- **`--modlist <toml>`** — явный пин-список (`[[mod]]`: `file`, `url`, опц.
+  `sha256`); для модов с прямых CDN (Modrinth/CF) или жёсткой фиксации версии.
+  Формат — `docs/modlist.example.toml`.
+
+**`--modlist-only`** — быстрая проверка модов без установки NeoForge/JRE/dist
+(пишет manifest лишь с модами). Удобно валидировать Release/modlist за секунды.
+
+⚠️ Лицензии ARR ⇒ ре-хостинг чужих jar в наших Releases юридически спорен;
+спорные оставлять ссылкой на исходный CDN через `--modlist`.
+
 ## Платформы
 
 - **Windows** и **Linux** — поддерживаются (лаунчер ОС-aware: ваниль с Mojang по

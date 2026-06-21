@@ -9,9 +9,12 @@
 //!    version JSON NeoForge + jar мода. Ваниль (ассеты/клиент) НЕ хостим —
 //!    лаунчер берёт её с Mojang.
 //! 4. Считает SHA-256 каждого файла и пишет `manifest.json`.
+//! 5. (Опц.) Сторонние моды из `--modlist <toml>`: качает каждый в кэш, считает/
+//!    сверяет SHA-256 и пишет в манифест ВНЕШНИЙ url (НЕ base_url). Сами jar'ы в
+//!    dist не кладутся — лаунчер качает их прямо из их источника (отд. репо/бакет).
 //!
 //! Запуск (из папки builder):
-//!   cargo run --release -- --base-url https://.../download --mod-jar <path>
+//!   cargo run --release -- --base-url https://.../download --mod-jar <path> [--modlist modlist.toml]
 //!
 //! Требуется `java` в PATH.
 
@@ -62,12 +65,20 @@ struct Config {
     neoforge: String,
     base_url: String,
     mod_jar: PathBuf,
+    modlist: Option<PathBuf>,
+    /// Репо `owner/name`, из Release которого автоматически берутся сторонние моды.
+    mods_release: Option<String>,
+    /// Тег Release для `mods_release`.
+    mods_tag: String,
     modpack_version: String,
     out: PathBuf,
     work: PathBuf,
     skip_install: bool,
     skip_jre: bool,
     skip_authlib: bool,
+    /// Только сторонние моды: пропустить установку NeoForge/JRE/dist, написать
+    /// manifest лишь с модами (быстрая проверка modlist/release).
+    modlist_only: bool,
 }
 
 fn main() -> Result<()> {
@@ -81,6 +92,12 @@ fn main() -> Result<()> {
         cfg.out.display(),
         cfg.work.display()
     );
+
+    // Режим «только моды»: пропускаем установку NeoForge/JRE/dist и пишем
+    // manifest лишь со сторонними модами (быстрая проверка modlist/release).
+    if cfg.modlist_only {
+        return run_modlist_only(&cfg);
+    }
 
     // NeoForge 1.21+ ставит профиль как `neoforge-<ver>` (без mc в имени);
     // на 1.20.1 это было `<mc>-forge-<ver>`.
@@ -251,6 +268,10 @@ fn main() -> Result<()> {
             kind: kind.to_string(),
         });
     }
+    // Сторонние моды (modlist.toml и/или Release GitHub) — хостятся ВНЕ dist.
+    // url в манифесте указывает на их источник напрямую, не на base_url.
+    files.extend(collect_mods(&cfg)?);
+
     files.sort_by(|a, b| a.path.cmp(&b.path));
     println!("всего файлов в манифесте: {}", files.len());
 
@@ -268,6 +289,212 @@ fn main() -> Result<()> {
     println!("\nГОТОВО → {}", manifest_path.display());
     println!("Залей содержимое {} на GitHub Releases (база = --base-url).", dist.display());
     Ok(())
+}
+
+// ---- сторонние моды (modlist.toml) ----
+
+/// Корень modlist.toml: массив таблиц `[[mod]]`.
+#[derive(serde::Deserialize)]
+struct ModList {
+    #[serde(default, rename = "mod")]
+    mods: Vec<ModEntry>,
+}
+
+/// Одна запись стороннего мода. Хостится вне dist — url ведёт на его источник
+/// (Release-ассет отдельного репо / объектный бакет).
+#[derive(serde::Deserialize)]
+struct ModEntry {
+    /// Имя jar в папке mods игрока (без слэшей).
+    file: String,
+    /// Прямой URL для скачивания (уже URL-энкоден, если в имени есть `+`).
+    url: String,
+    /// Ожидаемый SHA-256 (hex). Если задан — сборщик сверяет загруженное;
+    /// если опущен — вычисляет сам и подставляет в манифест.
+    #[serde(default)]
+    sha256: Option<String>,
+}
+
+/// Режим `--modlist-only`: только сторонние моды, без NeoForge/JRE/dist.
+/// Пишет минимальный manifest (моды + версии MC/NeoForge) для быстрой проверки.
+fn run_modlist_only(cfg: &Config) -> Result<()> {
+    println!("--modlist-only: пропускаю установку NeoForge/JRE/dist");
+    let files = collect_mods(cfg)?;
+    if files.is_empty() {
+        bail!("нет модов: укажи --modlist <toml> и/или --mods-release <owner/repo>");
+    }
+    fs::create_dir_all(&cfg.out)?;
+    let manifest = Manifest {
+        version: cfg.modpack_version.clone(),
+        minecraft: cfg.mc.clone(),
+        neoforge: cfg.neoforge.clone(),
+        neoforge_profile: None,
+        authlib_injector: None,
+        java: BTreeMap::new(),
+        files,
+    };
+    let manifest_path = cfg.out.join("manifest.json");
+    fs::write(&manifest_path, serde_json::to_string_pretty(&manifest)?)?;
+    println!("\nГОТОВО (только моды) → {}", manifest_path.display());
+    Ok(())
+}
+
+/// Собирает сторонние моды из обоих источников: `--modlist` (явный пин-список)
+/// и `--mods-release` (авто-список ассетов GitHub Release). При совпадении пути
+/// приоритет у modlist (явный пин важнее авто-выборки).
+fn collect_mods(cfg: &Config) -> Result<Vec<FileEntry>> {
+    let mut out = collect_external_mods(cfg)?;
+    let have: std::collections::HashSet<String> = out.iter().map(|e| e.path.clone()).collect();
+    for e in collect_release_mods(cfg)? {
+        if have.contains(&e.path) {
+            println!("пропускаю {} из Release — уже задан в modlist", e.path);
+            continue;
+        }
+        out.push(e);
+    }
+    Ok(out)
+}
+
+/// Авто-список модов из GitHub Release (`--mods-release owner/name --mods-tag`).
+/// Читает ассеты через API, качает каждый `.jar` в кэш, считает SHA-256 и
+/// возвращает `FileEntry` с url ассета. GH_TOKEN/GITHUB_TOKEN — против лимитов API.
+fn collect_release_mods(cfg: &Config) -> Result<Vec<FileEntry>> {
+    let Some(repo) = &cfg.mods_release else {
+        return Ok(Vec::new());
+    };
+    #[derive(serde::Deserialize)]
+    struct GhRelease {
+        assets: Vec<GhAsset>,
+    }
+    #[derive(serde::Deserialize)]
+    struct GhAsset {
+        name: String,
+        browser_download_url: String,
+        #[serde(default)]
+        size: u64,
+    }
+
+    let api = format!(
+        "https://api.github.com/repos/{repo}/releases/tags/{}",
+        cfg.mods_tag
+    );
+    println!("читаю Release: {api}");
+    let http = reqwest::blocking::Client::builder()
+        .user_agent("krp-builder")
+        .build()?;
+    let mut req = http.get(&api).header("Accept", "application/vnd.github+json");
+    if let Ok(tok) = std::env::var("GH_TOKEN").or_else(|_| std::env::var("GITHUB_TOKEN")) {
+        if !tok.is_empty() {
+            req = req.bearer_auth(tok);
+        }
+    }
+    let body = req
+        .send()
+        .context("запрос релиза GitHub")?
+        .error_for_status()
+        .with_context(|| format!("Release {repo}@{} не найден?", cfg.mods_tag))?
+        .text()?;
+    let rel: GhRelease = serde_json::from_str(&body).context("разбор JSON релиза")?;
+
+    let cache = cfg.work.join("modcache");
+    fs::create_dir_all(&cache)?;
+    let mut out = Vec::new();
+    for a in &rel.assets {
+        if !a.name.ends_with(".jar") {
+            continue;
+        }
+        let cached = cache.join(&a.name);
+        // Кэш переиспользуем, если размер совпал (sha заранее неизвестен).
+        let reuse = cached.is_file() && fs::metadata(&cached)?.len() == a.size && a.size != 0;
+        if reuse {
+            println!("мод из кэша: {}", a.name);
+        } else {
+            println!("качаю мод: {} ← {}", a.name, a.browser_download_url);
+            let bytes = http
+                .get(&a.browser_download_url)
+                .send()
+                .with_context(|| format!("запрос {}", a.browser_download_url))?
+                .error_for_status()
+                .with_context(|| format!("HTTP {}", a.browser_download_url))?
+                .bytes()?;
+            fs::write(&cached, &bytes)?;
+        }
+        out.push(FileEntry {
+            path: format!("mods/{}", a.name),
+            url: a.browser_download_url.clone(),
+            sha256: sha256_file(&cached)?,
+            size: fs::metadata(&cached)?.len(),
+            kind: "mod".to_string(),
+        });
+    }
+    println!("модов из Release: {}", out.len());
+    Ok(out)
+}
+
+/// Читает modlist.toml, скачивает каждый мод в кэш (`<work>/modcache`), считает
+/// и при наличии сверяет SHA-256, и возвращает `FileEntry` с ВНЕШНИМ url.
+/// Сами jar'ы в dist не копируются — лаунчер качает их напрямую по url.
+fn collect_external_mods(cfg: &Config) -> Result<Vec<FileEntry>> {
+    let Some(list_path) = &cfg.modlist else {
+        return Ok(Vec::new());
+    };
+    let text = fs::read_to_string(list_path)
+        .with_context(|| format!("чтение modlist {}", list_path.display()))?;
+    let list: ModList = toml::from_str(&text)
+        .with_context(|| format!("разбор TOML {}", list_path.display()))?;
+    if list.mods.is_empty() {
+        println!("modlist {} пуст — сторонних модов нет", list_path.display());
+        return Ok(Vec::new());
+    }
+
+    let cache = cfg.work.join("modcache");
+    fs::create_dir_all(&cache)?;
+    let http = reqwest::blocking::Client::builder().build()?;
+
+    let mut out = Vec::with_capacity(list.mods.len());
+    for m in &list.mods {
+        if m.file.contains('/') || m.file.contains('\\') || m.file.is_empty() {
+            bail!("плохое имя файла мода в modlist: {:?}", m.file);
+        }
+        let cached = cache.join(&m.file);
+        // Кэш переиспользуем, только если хеш совпадает с заявленным.
+        let need_download = match (&m.sha256, cached.is_file()) {
+            (Some(want), true) => !want.eq_ignore_ascii_case(&sha256_file(&cached)?),
+            (None, true) => false, // без заявленного хеша доверяем уже скачанному
+            (_, false) => true,
+        };
+        if need_download {
+            println!("качаю мод: {} ← {}", m.file, m.url);
+            let bytes = http
+                .get(&m.url)
+                .send()
+                .with_context(|| format!("запрос {}", m.url))?
+                .error_for_status()
+                .with_context(|| format!("HTTP {}", m.url))?
+                .bytes()?;
+            fs::write(&cached, &bytes)?;
+        } else {
+            println!("мод из кэша: {}", m.file);
+        }
+
+        let sha256 = sha256_file(&cached)?;
+        if let Some(want) = &m.sha256 {
+            if !want.eq_ignore_ascii_case(&sha256) {
+                bail!(
+                    "SHA-256 не совпал для {}: ожидался {want}, получен {sha256}",
+                    m.file
+                );
+            }
+        }
+        out.push(FileEntry {
+            path: format!("mods/{}", m.file),
+            url: m.url.clone(),
+            sha256,
+            size: fs::metadata(&cached)?.len(),
+            kind: "mod".to_string(),
+        });
+    }
+    println!("сторонних модов из modlist: {}", out.len());
+    Ok(out)
 }
 
 /// Скачать установщик и прогнать `--installClient`.
@@ -341,6 +568,10 @@ fn parse_args() -> Result<Config> {
     let mut neoforge = "21.1.233".to_string();
     let mut base_url = "https://example.com/kingdomrp".to_string();
     let mut mod_jar = PathBuf::from("../../krp-mod/build/libs/kingdomrpcore-0.1.0.jar");
+    let mut modlist: Option<PathBuf> = None;
+    let mut mods_release: Option<String> = None;
+    let mut mods_tag = "v1".to_string();
+    let mut modlist_only = false;
     let mut modpack_version = "1.0.0".to_string();
     let mut out = PathBuf::from("dist");
     let mut work = PathBuf::from("build-work");
@@ -361,6 +592,19 @@ fn parse_args() -> Result<Config> {
             "--mod-jar" => {
                 mod_jar = PathBuf::from(args.next().ok_or_else(|| anyhow!("--mod-jar requires value"))?)
             }
+            "--modlist" => {
+                modlist = Some(PathBuf::from(
+                    args.next().ok_or_else(|| anyhow!("--modlist requires value"))?,
+                ))
+            }
+            "--mods-release" => {
+                mods_release =
+                    Some(args.next().ok_or_else(|| anyhow!("--mods-release requires value"))?)
+            }
+            "--mods-tag" => {
+                mods_tag = args.next().ok_or_else(|| anyhow!("--mods-tag requires value"))?
+            }
+            "--modlist-only" => modlist_only = true,
             "--version" => {
                 modpack_version = args.next().ok_or_else(|| anyhow!("--version requires value"))?
             }
@@ -370,7 +614,7 @@ fn parse_args() -> Result<Config> {
             "--skip-jre" => skip_jre = true,
             "--skip-authlib" => skip_authlib = true,
             "-h" | "--help" => {
-                println!("krp-builder --base-url URL [--mod-jar PATH] [--mc 1.21.1] [--neoforge 21.1.233] [--version 1.0.0] [--out dist] [--work build-work] [--skip-install]");
+                println!("krp-builder --base-url URL [--mod-jar PATH]\n  Сторонние моды: [--modlist modlist.toml] [--mods-release owner/repo] [--mods-tag v1] [--modlist-only]\n  Прочее: [--mc 1.21.1] [--neoforge 21.1.233] [--version 1.0.0] [--out dist] [--work build-work] [--skip-install] [--skip-jre] [--skip-authlib]");
                 std::process::exit(0);
             }
             other => bail!("неизвестный аргумент: {other}"),
@@ -382,6 +626,10 @@ fn parse_args() -> Result<Config> {
         neoforge,
         base_url,
         mod_jar,
+        modlist,
+        mods_release,
+        mods_tag,
+        modlist_only,
         modpack_version,
         out,
         work,
