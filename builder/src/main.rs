@@ -196,7 +196,9 @@ fn main() -> Result<()> {
     };
 
     // 4) JRE (Temurin 21) — снимки с Adoptium под каждую платформу, хостим у себя
-    // с фикс. SHA-256. Windows = .zip, Linux = .tar.gz.
+    // с фикс. SHA-256. Windows = .zip, Linux = .tar.gz. Архивы кэшируем в
+    // `<work>/jrecache` — на CI этот каталог переживает прогоны через actions/cache,
+    // так что JRE не перекачивается, пока кэш жив.
     let mut java = BTreeMap::new();
     if !cfg.skip_jre {
         // (ключ платформы, os, arch, расширение архива Adoptium)
@@ -205,33 +207,41 @@ fn main() -> Result<()> {
             ("linux-x64", "linux", "x64", "tar.gz"),
         ];
         let http = reqwest::blocking::Client::builder().build()?;
+        let jre_cache = cfg.work.join("jrecache");
+        fs::create_dir_all(&jre_cache)?;
         for (key, os, arch, ext) in platforms {
             let rel = format!("java/jre21-{key}.{ext}");
             let dest = dist.join(rel.replace('/', std::path::MAIN_SEPARATOR_STR));
             fs::create_dir_all(dest.parent().unwrap())?;
-            let url = format!(
-                "https://api.adoptium.net/v3/binary/latest/21/ga/{os}/{arch}/jre/hotspot/normal/eclipse"
-            );
-            println!("скачиваю Temurin 21 JRE ({key})…");
-            let bytes = http
-                .get(&url)
-                .send()
-                .context("запрос JRE")?
-                .error_for_status()
-                .context("HTTP JRE")?
-                .bytes()?;
-            fs::write(&dest, &bytes)?;
-            let sha256 = sha256_file(&dest)?;
+            let cached = jre_cache.join(format!("jre21-{key}.{ext}"));
+            if cached.is_file() && fs::metadata(&cached)?.len() > 0 {
+                println!("JRE из кэша: {key}");
+            } else {
+                let url = format!(
+                    "https://api.adoptium.net/v3/binary/latest/21/ga/{os}/{arch}/jre/hotspot/normal/eclipse"
+                );
+                println!("скачиваю Temurin 21 JRE ({key})…");
+                let bytes = http
+                    .get(&url)
+                    .send()
+                    .context("запрос JRE")?
+                    .error_for_status()
+                    .context("HTTP JRE")?
+                    .bytes()?;
+                fs::write(&cached, &bytes)?;
+            }
+            fs::copy(&cached, &dest)?;
+            let size = fs::metadata(&cached)?.len();
             java.insert(
                 key.to_string(),
                 JavaEntry {
                     url: format!("{}/{}", cfg.base_url.trim_end_matches('/'), rel),
-                    sha256,
-                    size: bytes.len() as u64,
+                    sha256: sha256_file(&cached)?,
+                    size,
                     dir: "runtime".to_string(),
                 },
             );
-            println!("JRE: {rel} ({} МБ)", bytes.len() / 1024 / 1024);
+            println!("JRE: {rel} ({} МБ)", size / 1024 / 1024);
         }
     } else {
         println!("--skip-jre: java-entry в манифест не добавлен");
