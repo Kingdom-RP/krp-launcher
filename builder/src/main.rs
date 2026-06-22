@@ -323,21 +323,32 @@ fn write_and_sign_manifest(manifest_path: &Path, manifest: &Manifest) -> Result<
         .ok()
         .filter(|s| !s.is_empty());
 
-    let sk_box =
-        minisign::SecretKeyBox::from_string(&sk_str).context("разбор KRP_MANIFEST_SECRET_KEY")?;
     // ВАЖНО: НИКОГДА не вызываем into_secret_key(None) — при зашифрованном ключе
     // minisign уходит в интерактивный запрос пароля через stdin, а в CI нет tty →
-    // зависание навсегда. Поэтому: есть пароль → расшифровываем им; нет пароля →
-    // трактуем ключ как без пароля (into_unencrypted_secret_key не читает stdin, а
-    // на зашифрованном ключе сразу даёт понятную ошибку).
+    // зависание навсегда. Поэтому пароль всегда Some(...).
     let sk = match password {
-        Some(pw) => sk_box
+        Some(pw) => minisign::SecretKeyBox::from_string(&sk_str)
+            .context("разбор KRP_MANIFEST_SECRET_KEY")?
             .into_secret_key(Some(pw))
             .context("расшифровка секретного ключа манифеста (неверный пароль?)")?,
-        None => sk_box.into_unencrypted_secret_key().context(
-            "секретный ключ зашифрован, но KRP_MANIFEST_SECRET_KEY_PASSWORD не задан \
-             (добавьте секрет с паролем или используйте passwordless-ключ: rsign generate -W)",
-        )?,
+        // Без пароля: rsign `generate -W` создаёт ключ, зашифрованный ПУСТЫМ
+        // паролем (kdf присутствует, не KDF_NONE), поэтому into_unencrypted падает.
+        // Пробуем оба варианта: настоящий unencrypted-ключ и «пустой пароль».
+        None => {
+            let unenc = minisign::SecretKeyBox::from_string(&sk_str)
+                .context("разбор KRP_MANIFEST_SECRET_KEY")?
+                .into_unencrypted_secret_key();
+            match unenc {
+                Ok(sk) => sk,
+                Err(_) => minisign::SecretKeyBox::from_string(&sk_str)
+                    .context("разбор KRP_MANIFEST_SECRET_KEY")?
+                    .into_secret_key(Some(String::new()))
+                    .context(
+                        "ключ не расшифровывается ни как passwordless, ни пустым паролем — \
+                         задайте KRP_MANIFEST_SECRET_KEY_PASSWORD",
+                    )?,
+            }
+        }
     };
     let sig_box = minisign::sign(None, &sk, std::io::Cursor::new(json.as_bytes()), None, None)
         .context("подпись манифеста")?;
