@@ -194,7 +194,7 @@ pub fn build_args(
         .join("versions")
         .join(mc_version)
         .join(format!("{mc_version}.json"));
-    let forge_path = install_dir.join(neoforge_profile_rel.replace('/', std::path::MAIN_SEPARATOR_STR));
+    let forge_path = crate::paths::safe_join(install_dir, neoforge_profile_rel)?;
 
     let vanilla = read_version(&vanilla_path)?;
     let forge = read_version(&forge_path)?;

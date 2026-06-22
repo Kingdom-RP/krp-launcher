@@ -19,3 +19,6 @@ serde_json = "1"
 toml = "0.8"
 walkdir = "2"
 anyhow = "1"
+# Подпись manifest.json (minisign, prehashed). Лаунчер проверяет тем же форматом
+# (minisign-verify). Сборщик — CLI в CI, его вес на лаунчер не влияет.
+minisign = "0.9"

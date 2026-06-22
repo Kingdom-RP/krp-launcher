@@ -34,6 +34,9 @@ sha2 = "0.10"
 sha1 = "0.10"
 hex = "0.4"
 base64 = "0.22"
+# Проверка minisign-подписи manifest.json (тот же формат, что у автообновления).
+# Уже в дереве зависимостей через tauri-plugin-updater → 0 байт к бинарю.
+minisign-verify = "0.2"
 thiserror = "1"
 dirs = "5"
 # Только deflate — стандартное сжатие JRE-/mod-архивов. Без zstd/bzip2/lzma/aes

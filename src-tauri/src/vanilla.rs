@@ -260,9 +260,7 @@ pub async fn ensure_vanilla(
     // 2. библиотеки
     for lib in &libs {
         if let Some(artifact) = lib.downloads.as_ref().and_then(|d| d.artifact.as_ref()) {
-            let dest = install_dir
-                .join("libraries")
-                .join(artifact.path.replace('/', std::path::MAIN_SEPARATOR_STR));
+            let dest = crate::paths::safe_join(&install_dir.join("libraries"), &artifact.path)?;
             let did =
                 download::ensure_file_sha1(client, &artifact.url, &dest, &artifact.sha1, progress.file_cb())
                     .await?;

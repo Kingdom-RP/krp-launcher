@@ -2110,6 +2110,7 @@ dependencies = [
  "futures-util",
  "hex",
  "log",
+ "minisign-verify",
  "reqwest 0.12.28",
  "serde",
  "serde_json",

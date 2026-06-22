@@ -147,9 +147,8 @@ pub async fn sync_manifest(
     let mut skipped = 0usize;
 
     for entry in &manifest.files {
-        // В манифесте пути через `/` — переводим в разделитель ОС.
-        let rel = entry.path.replace('/', std::path::MAIN_SEPARATOR_STR);
-        let dest = install_dir.join(rel);
+        // Путь из манифеста — через safe_join (защита от path traversal).
+        let dest = crate::paths::safe_join(install_dir, &entry.path)?;
         progress.set_label(friendly_label(entry.kind, verb));
 
         let did = download::ensure_file(client, &entry.url, &dest, &entry.sha256, progress.file_cb())
@@ -337,8 +336,7 @@ pub async fn play(
                 Some(rel) => {
                     auth::ensure_session(client, &base, &mut account).await?;
                     let _ = settings::set_account(app, Some(account.clone()));
-                    let injector =
-                        install_dir.join(rel.replace('/', std::path::MAIN_SEPARATOR_STR));
+                    let injector = crate::paths::safe_join(&install_dir, rel)?;
                     let api_url = format!("{}/authlib-injector", base.trim_end_matches('/'));
                     log::info!("play: онлайн-запуск как '{}'", account.player_name);
                     Some((

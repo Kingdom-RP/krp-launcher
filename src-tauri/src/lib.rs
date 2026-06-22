@@ -19,12 +19,6 @@ use install::SyncSummary;
 use manifest::Manifest;
 use paths::PathValidation;
 
-/// Демо-команда из шаблона — пока оставлена, чтобы стартовый UI работал.
-#[tauri::command]
-fn greet(name: &str) -> String {
-    format!("Hello, {}! You've been greeted from Rust!", name)
-}
-
 /// Папка установки по умолчанию (`%APPDATA%\KingdomRP`).
 #[tauri::command]
 fn default_install_dir() -> Result<String> {
@@ -199,7 +193,9 @@ async fn skin_preview_url(
 #[tauri::command]
 fn open_dir(path: String) -> Result<()> {
     let p = Path::new(&path);
-    if !p.exists() {
+    // Только существующий КАТАЛОГ: `explorer <файл>` на Windows может запустить
+    // исполняемый файл — не даём открывать ничего, кроме папок.
+    if !p.is_dir() {
         return Err(error::LauncherError::Other(format!(
             "папка не найдена: {path}"
         )));
@@ -332,33 +328,6 @@ async fn play(
         .inspect_err(|e| log::error!("play: ошибка: {e}"))
 }
 
-/// Запустить игру (офлайн-режим). Возвращает PID процесса.
-/// `neoforge_profile` — из манифеста (`Manifest::neoforge_profile`),
-/// `java_exe` — путь к java (из `ensure_java`).
-#[tauri::command]
-async fn launch_game(
-    install_dir: String,
-    neoforge_profile: String,
-    java_exe: String,
-    player_name: String,
-) -> Result<u32> {
-    // launch блокирует поток (ожидание раннего краха) — в blocking-пул.
-    // Возвращаем только PID; дочерний процесс отпускаем (игра живёт сама).
-    tokio::task::spawn_blocking(move || {
-        launch::launch(
-            Path::new(&install_dir),
-            config::MINECRAFT_VERSION,
-            &neoforge_profile,
-            Path::new(&java_exe),
-            &player_name,
-            None,
-        )
-        .map(|child| child.id())
-    })
-    .await
-    .map_err(|e| error::LauncherError::Other(format!("задача запуска прервана: {e}")))?
-}
-
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     // Логируем паники самого лаунчера в общий лог (плагин log пишет в файл),
@@ -407,7 +376,6 @@ pub fn run() {
                 .expect("не удалось создать HTTP-клиент"),
         )
         .invoke_handler(tauri::generate_handler![
-            greet,
             default_install_dir,
             get_install_dir,
             set_install_dir,
@@ -431,7 +399,6 @@ pub fn run() {
             ensure_vanilla,
             sync_files,
             install_game,
-            launch_game,
             play,
         ])
         .run(tauri::generate_context!())

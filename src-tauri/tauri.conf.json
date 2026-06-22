@@ -22,7 +22,25 @@
       }
     ],
     "security": {
-      "csp": null
+      "csp": {
+        "default-src": ["'self'"],
+        "script-src": ["'self'"],
+        "style-src": ["'self'", "'unsafe-inline'"],
+        "img-src": ["'self'", "data:", "blob:", "asset:", "http://asset.localhost"],
+        "font-src": ["'self'", "data:"],
+        "connect-src": [
+          "'self'",
+          "ipc:",
+          "http://ipc.localhost",
+          "ws://localhost:1421",
+          "https://kingdom-rp.github.io",
+          "https://github.com",
+          "https://objects.githubusercontent.com",
+          "https://*.mojang.com",
+          "https://*.minecraft.net",
+          "http://localhost:25585"
+        ]
+      }
     }
   },
   "bundle": {

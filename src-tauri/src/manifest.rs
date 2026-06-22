@@ -75,8 +75,13 @@ pub enum FileKind {
 
 /// Скачать и разобрать манифест по URL. Манифест маленький — ограничиваем
 /// время запроса (источник на GitHub Pages с российских IP бывает недоступен).
+///
+/// Если задан [`crate::config::MANIFEST_PUBKEY`], манифест ДОЛЖЕН иметь валидную
+/// minisign-подпись (`manifest.json.minisig` рядом на источнике) — иначе ошибка
+/// (fail-closed, защита от подмены манифеста при компрометации источника/MITM).
+/// Пустой ключ → проверка пропускается (доверие TLS+GitHub Pages).
 pub async fn fetch_manifest(client: &reqwest::Client, url: &str) -> Result<Manifest> {
-    let manifest = client
+    let resp = client
         .get(url)
         .timeout(std::time::Duration::from_secs(20))
         .send()
@@ -87,8 +92,55 @@ pub async fn fetch_manifest(client: &reqwest::Client, url: &str) -> Result<Manif
                  (GitHub) недоступен с вашего интернета. Подробности: {e}"
             ))
         })?
-        .error_for_status()?
-        .json::<Manifest>()
-        .await?;
+        .error_for_status()?;
+    let body = resp.text().await?;
+
+    verify_signature(client, body.as_bytes()).await?;
+
+    let manifest: Manifest = serde_json::from_str(&body)?;
     Ok(manifest)
+}
+
+/// Проверить minisign-подпись тела манифеста. Без ключа — no-op.
+async fn verify_signature(client: &reqwest::Client, body: &[u8]) -> Result<()> {
+    use crate::error::LauncherError;
+
+    let pubkey = crate::config::MANIFEST_PUBKEY.trim();
+    if pubkey.is_empty() {
+        log::warn!("manifest: проверка подписи отключена (MANIFEST_PUBKEY пуст)");
+        return Ok(());
+    }
+
+    let sig_url = crate::config::manifest_sig_url();
+    let sig_text = client
+        .get(&sig_url)
+        .timeout(std::time::Duration::from_secs(20))
+        .send()
+        .await
+        .map_err(|e| {
+            LauncherError::Other(format!("не удалось получить подпись манифеста ({sig_url}): {e}"))
+        })?
+        .error_for_status()
+        .map_err(|e| LauncherError::Other(format!("подпись манифеста недоступна: {e}")))?
+        .text()
+        .await?;
+
+    let public_key = minisign_verify::PublicKey::from_base64(pubkey)
+        .map_err(|e| LauncherError::Other(format!("некорректный MANIFEST_PUBKEY: {e}")))?;
+    let signature = minisign_verify::Signature::decode(&sig_text)
+        .map_err(|e| LauncherError::Other(format!("некорректная подпись манифеста: {e}")))?;
+
+    // allow_legacy=true: принимаем и prehashed, и legacy (минисайн-крейт сборщика
+    // по умолчанию подписывает legacy; для маленького manifest.json это безопасно).
+    public_key
+        .verify(body, &signature, true)
+        .map_err(|_| {
+            LauncherError::Other(
+                "подпись manifest.json не прошла проверку — источник модпака мог быть \
+                 подменён. Обновление отменено."
+                    .into(),
+            )
+        })?;
+    log::info!("manifest: подпись проверена ✓");
+    Ok(())
 }

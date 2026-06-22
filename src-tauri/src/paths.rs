@@ -13,6 +13,42 @@ use crate::error::{LauncherError, Result};
 /// Имя папки игры, которое лаунчер добавляет к выбранному каталогу.
 pub const APP_DIR_NAME: &str = "Kingdom RP";
 
+/// Безопасно присоединить относительный путь (из манифеста/Mojang) к базовой
+/// папке установки. Путь приходит из сети, поэтому защищаемся от path traversal:
+/// разрешены только «нормальные» компоненты (`mods/x.jar`), а абсолютные пути,
+/// префиксы диска (`C:\`), корень и `..` отклоняются. Без этого
+/// скомпрометированный/подменённый манифест мог бы записать файл вне `base`
+/// (напр. в автозагрузку) — SHA-256 проверяет содержимое, но не путь назначения.
+pub fn safe_join(base: &Path, rel: &str) -> Result<PathBuf> {
+    use std::path::Component;
+
+    // Нормализуем разделители к разделителю ОС.
+    let rel = rel.replace('/', std::path::MAIN_SEPARATOR_STR);
+    let mut out = base.to_path_buf();
+    let mut pushed = false;
+    for comp in Path::new(&rel).components() {
+        match comp {
+            Component::Normal(seg) => {
+                out.push(seg);
+                pushed = true;
+            }
+            // `.` игнорируем; всё остальное (RootDir, Prefix `C:\`, `..`) — отказ.
+            Component::CurDir => {}
+            _ => {
+                return Err(LauncherError::Other(format!(
+                    "недопустимый путь в манифесте: {rel:?}"
+                )));
+            }
+        }
+    }
+    if !pushed {
+        return Err(LauncherError::Other(format!(
+            "пустой путь в манифесте: {rel:?}"
+        )));
+    }
+    Ok(out)
+}
+
 /// Папка установки по умолчанию: `%APPDATA%\Kingdom RP`.
 pub fn default_install_dir() -> Result<PathBuf> {
     let base = dirs::data_dir()
@@ -116,4 +152,37 @@ async fn check_writable(path: &Path) -> Result<()> {
     tokio::fs::write(&probe, b"ok").await?;
     tokio::fs::remove_file(&probe).await?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn safe_join_allows_normal_paths() {
+        let base = Path::new("/install");
+        assert_eq!(
+            safe_join(base, "mods/x.jar").unwrap(),
+            base.join("mods").join("x.jar")
+        );
+        // `.` компоненты игнорируются.
+        assert_eq!(
+            safe_join(base, "./libraries/a/b.jar").unwrap(),
+            base.join("libraries").join("a").join("b.jar")
+        );
+    }
+
+    #[test]
+    fn safe_join_rejects_traversal() {
+        let base = Path::new("/install");
+        assert!(safe_join(base, "../evil").is_err());
+        assert!(safe_join(base, "mods/../../evil").is_err());
+        assert!(safe_join(base, "/etc/passwd").is_err());
+        assert!(safe_join(base, "").is_err());
+        #[cfg(windows)]
+        {
+            assert!(safe_join(base, "C:\\Windows\\x").is_err());
+            assert!(safe_join(base, "..\\evil").is_err());
+        }
+    }
 }

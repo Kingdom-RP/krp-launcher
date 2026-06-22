@@ -295,9 +295,45 @@ fn main() -> Result<()> {
         files,
     };
     let manifest_path = dist.join("manifest.json");
-    fs::write(&manifest_path, serde_json::to_string_pretty(&manifest)?)?;
+    write_and_sign_manifest(&manifest_path, &manifest)?;
     println!("\nГОТОВО → {}", manifest_path.display());
     println!("Залей содержимое {} на GitHub Releases (база = --base-url).", dist.display());
+    Ok(())
+}
+
+/// Записать `manifest.json` и, если задан секретный ключ в окружении, рядом
+/// положить detached minisign-подпись `manifest.json.minisig`.
+///
+/// Ключ берётся из `KRP_MANIFEST_SECRET_KEY` (содержимое `.key`-файла minisign;
+/// в CI — секрет репозитория), пароль — из `KRP_MANIFEST_SECRET_KEY_PASSWORD`
+/// (пусто/нет → ключ без пароля). Если переменной нет — подпись пропускается
+/// (локальные прогоны/совместимость), лаунчер тогда тоже не требует подпись.
+fn write_and_sign_manifest(manifest_path: &Path, manifest: &Manifest) -> Result<()> {
+    let json = serde_json::to_string_pretty(manifest)?;
+    fs::write(manifest_path, &json)?;
+
+    let sk_str = match std::env::var("KRP_MANIFEST_SECRET_KEY") {
+        Ok(v) if !v.trim().is_empty() => v,
+        _ => {
+            println!("⚠ подпись манифеста пропущена (нет KRP_MANIFEST_SECRET_KEY)");
+            return Ok(());
+        }
+    };
+    let password = std::env::var("KRP_MANIFEST_SECRET_KEY_PASSWORD")
+        .ok()
+        .filter(|s| !s.is_empty());
+
+    let sk_box =
+        minisign::SecretKeyBox::from_string(&sk_str).context("разбор KRP_MANIFEST_SECRET_KEY")?;
+    let sk = sk_box
+        .into_secret_key(password)
+        .context("расшифровка секретного ключа манифеста")?;
+    let sig_box = minisign::sign(None, &sk, std::io::Cursor::new(json.as_bytes()), None, None)
+        .context("подпись манифеста")?;
+
+    let sig_path = manifest_path.with_file_name("manifest.json.minisig");
+    fs::write(&sig_path, sig_box.into_string())?;
+    println!("✓ подпись манифеста → {}", sig_path.display());
     Ok(())
 }
 
@@ -343,7 +379,7 @@ fn run_modlist_only(cfg: &Config) -> Result<()> {
         files,
     };
     let manifest_path = cfg.out.join("manifest.json");
-    fs::write(&manifest_path, serde_json::to_string_pretty(&manifest)?)?;
+    write_and_sign_manifest(&manifest_path, &manifest)?;
     println!("\nГОТОВО (только моды) → {}", manifest_path.display());
     Ok(())
 }
