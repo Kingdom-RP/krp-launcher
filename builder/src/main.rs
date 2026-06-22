@@ -325,9 +325,20 @@ fn write_and_sign_manifest(manifest_path: &Path, manifest: &Manifest) -> Result<
 
     let sk_box =
         minisign::SecretKeyBox::from_string(&sk_str).context("разбор KRP_MANIFEST_SECRET_KEY")?;
-    let sk = sk_box
-        .into_secret_key(password)
-        .context("расшифровка секретного ключа манифеста")?;
+    // ВАЖНО: НИКОГДА не вызываем into_secret_key(None) — при зашифрованном ключе
+    // minisign уходит в интерактивный запрос пароля через stdin, а в CI нет tty →
+    // зависание навсегда. Поэтому: есть пароль → расшифровываем им; нет пароля →
+    // трактуем ключ как без пароля (into_unencrypted_secret_key не читает stdin, а
+    // на зашифрованном ключе сразу даёт понятную ошибку).
+    let sk = match password {
+        Some(pw) => sk_box
+            .into_secret_key(Some(pw))
+            .context("расшифровка секретного ключа манифеста (неверный пароль?)")?,
+        None => sk_box.into_unencrypted_secret_key().context(
+            "секретный ключ зашифрован, но KRP_MANIFEST_SECRET_KEY_PASSWORD не задан \
+             (добавьте секрет с паролем или используйте passwordless-ключ: rsign generate -W)",
+        )?,
+    };
     let sig_box = minisign::sign(None, &sk, std::io::Cursor::new(json.as_bytes()), None, None)
         .context("подпись манифеста")?;
 
