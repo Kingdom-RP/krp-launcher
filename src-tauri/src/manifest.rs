@@ -36,6 +36,13 @@ pub struct Manifest {
     pub files: Vec<FileEntry>,
 }
 
+impl Manifest {
+    /// Файлы, нужные клиенту (лаунчеру): client + both. Server-only исключаются.
+    pub fn client_files(&self) -> impl Iterator<Item = &FileEntry> {
+        self.files.iter().filter(|f| f.for_client())
+    }
+}
+
 /// Описание JRE для конкретной платформы.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct JavaEntry {
@@ -59,6 +66,27 @@ pub struct FileEntry {
     pub size: u64,
     #[serde(default)]
     pub kind: FileKind,
+    /// Сторона файла. Лаунчер (клиент) берёт client+both; server-only пропускает.
+    /// Старые манифесты без поля → both (обратная совместимость).
+    #[serde(default)]
+    pub side: Side,
+}
+
+impl FileEntry {
+    /// Нужен ли файл клиенту (лаунчеру): всё, кроме чисто серверного.
+    pub fn for_client(&self) -> bool {
+        !matches!(self.side, Side::Server)
+    }
+}
+
+/// Сторона файла в манифесте.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, Default, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum Side {
+    Client,
+    Server,
+    #[default]
+    Both,
 }
 
 /// Категория файла — пригодится для UI и логики запуска.

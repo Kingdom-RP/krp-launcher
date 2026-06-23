@@ -128,7 +128,7 @@ pub async fn sync_files(
 ) -> Result<SyncSummary> {
     let manifest = manifest::fetch_manifest(client, &config::manifest_url()).await?;
     let progress = Progress::new(app.clone());
-    progress.add_total(manifest.files.iter().map(|f| f.size).sum());
+    progress.add_total(manifest.client_files().map(|f| f.size).sum());
     sync_manifest(client, &install_dir, &manifest, &progress, "Проверяем").await
 }
 
@@ -142,11 +142,13 @@ pub async fn sync_manifest(
     progress: &Progress,
     verb: &str,
 ) -> Result<SyncSummary> {
-    let total = manifest.files.len();
+    // Клиентский потребитель: качаем только client+both (server-only пропускаем).
+    let client_files: Vec<&manifest::FileEntry> = manifest.client_files().collect();
+    let total = client_files.len();
     let mut downloaded = 0usize;
     let mut skipped = 0usize;
 
-    for entry in &manifest.files {
+    for entry in &client_files {
         // Путь из манифеста — через safe_join (защита от path traversal).
         let dest = crate::paths::safe_join(install_dir, &entry.path)?;
         progress.set_label(friendly_label(entry.kind, verb));
@@ -175,9 +177,10 @@ pub async fn sync_manifest(
 /// остаются (их целостность уже гарантирована sync по SHA-256). Возвращает
 /// число удалённых файлов.
 fn prune_mods(install_dir: &Path, manifest: &manifest::Manifest) -> Result<usize> {
+    // Разрешённые в mods/ — только клиентские файлы манифеста (server-only сюда
+    // и не качаются, поэтому в allowed их не включаем).
     let allowed: HashSet<String> = manifest
-        .files
-        .iter()
+        .client_files()
         .map(|f| f.path.replace('\\', "/").to_lowercase())
         .collect();
 
@@ -222,8 +225,8 @@ async fn sync_all(
     progress: &Progress,
     verb: &str,
 ) -> Result<PathBuf> {
-    // Объём файлов манифеста (NeoForge + моды) знаем заранее.
-    progress.add_total(manifest.files.iter().map(|f| f.size).sum());
+    // Объём файлов манифеста (NeoForge + моды) знаем заранее — только клиентские.
+    progress.add_total(manifest.client_files().map(|f| f.size).sum());
     // Объём JRE.
     let java_entry = manifest.java.get(java::platform_key()).ok_or_else(|| {
         LauncherError::Other(format!(

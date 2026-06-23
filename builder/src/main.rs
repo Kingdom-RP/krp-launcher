@@ -58,6 +58,9 @@ struct FileEntry {
     sha256: String,
     size: u64,
     kind: String,
+    /// Сторона: "client" | "server" | "both". Лаунчер берёт client+both,
+    /// будущий серверный синк — server+both.
+    side: String,
 }
 
 struct Config {
@@ -66,6 +69,8 @@ struct Config {
     base_url: String,
     mod_jar: PathBuf,
     modlist: Option<PathBuf>,
+    /// Путь к sides.toml (client/server-списки). Нет — все моды "both".
+    sides: Option<PathBuf>,
     /// Репо `owner/name`, из Release которого автоматически берутся сторонние моды.
     mods_release: Option<String>,
     /// Тег Release для `mods_release`.
@@ -276,6 +281,8 @@ fn main() -> Result<()> {
             sha256,
             size,
             kind: kind.to_string(),
+            // Ядро NeoForge + наш мод нужны обеим сторонам.
+            side: "both".to_string(),
         });
     }
     // Сторонние моды (modlist.toml и/или Release GitHub) — хостятся ВНЕ dist.
@@ -406,13 +413,63 @@ fn run_modlist_only(cfg: &Config) -> Result<()> {
     Ok(())
 }
 
+/// Сторона мода: client/server-списки из sides.toml (подстрока имени файла).
+/// Не перечислено → "both". Совпадение в обоих списках — ошибка конфигурации.
+#[derive(Default)]
+struct Sides {
+    client: Vec<String>,
+    server: Vec<String>,
+}
+
+impl Sides {
+    fn load(path: Option<&Path>) -> Result<Self> {
+        let Some(p) = path else {
+            return Ok(Self::default());
+        };
+        #[derive(serde::Deserialize)]
+        struct Raw {
+            #[serde(default)]
+            client: Vec<String>,
+            #[serde(default)]
+            server: Vec<String>,
+        }
+        let text =
+            fs::read_to_string(p).with_context(|| format!("чтение sides {}", p.display()))?;
+        let raw: Raw =
+            toml::from_str(&text).with_context(|| format!("разбор TOML {}", p.display()))?;
+        println!(
+            "sides: {} client, {} server (остальное both)",
+            raw.client.len(),
+            raw.server.len()
+        );
+        Ok(Self {
+            client: raw.client,
+            server: raw.server,
+        })
+    }
+
+    /// Определить сторону по имени jar. Возвращает "client" | "server" | "both".
+    fn side_for(&self, filename: &str) -> Result<&'static str> {
+        let lower = filename.to_lowercase();
+        let is_client = self.client.iter().any(|s| lower.contains(&s.to_lowercase()));
+        let is_server = self.server.iter().any(|s| lower.contains(&s.to_lowercase()));
+        match (is_client, is_server) {
+            (true, true) => bail!("{filename} перечислен и в client, и в server (sides.toml)"),
+            (true, false) => Ok("client"),
+            (false, true) => Ok("server"),
+            (false, false) => Ok("both"),
+        }
+    }
+}
+
 /// Собирает сторонние моды из обоих источников: `--modlist` (явный пин-список)
 /// и `--mods-release` (авто-список ассетов GitHub Release). При совпадении пути
-/// приоритет у modlist (явный пин важнее авто-выборки).
+/// приоритет у modlist (явный пин важнее авто-выборки). Сторона — из sides.toml.
 fn collect_mods(cfg: &Config) -> Result<Vec<FileEntry>> {
-    let mut out = collect_external_mods(cfg)?;
+    let sides = Sides::load(cfg.sides.as_deref())?;
+    let mut out = collect_external_mods(cfg, &sides)?;
     let have: std::collections::HashSet<String> = out.iter().map(|e| e.path.clone()).collect();
-    for e in collect_release_mods(cfg)? {
+    for e in collect_release_mods(cfg, &sides)? {
         if have.contains(&e.path) {
             println!("пропускаю {} из Release — уже задан в modlist", e.path);
             continue;
@@ -425,7 +482,7 @@ fn collect_mods(cfg: &Config) -> Result<Vec<FileEntry>> {
 /// Авто-список модов из GitHub Release (`--mods-release owner/name --mods-tag`).
 /// Читает ассеты через API, качает каждый `.jar` в кэш, считает SHA-256 и
 /// возвращает `FileEntry` с url ассета. GH_TOKEN/GITHUB_TOKEN — против лимитов API.
-fn collect_release_mods(cfg: &Config) -> Result<Vec<FileEntry>> {
+fn collect_release_mods(cfg: &Config, sides: &Sides) -> Result<Vec<FileEntry>> {
     let Some(repo) = &cfg.mods_release else {
         return Ok(Vec::new());
     };
@@ -492,6 +549,7 @@ fn collect_release_mods(cfg: &Config) -> Result<Vec<FileEntry>> {
             sha256: sha256_file(&cached)?,
             size: fs::metadata(&cached)?.len(),
             kind: "mod".to_string(),
+            side: sides.side_for(&a.name)?.to_string(),
         });
     }
     println!("модов из Release: {}", out.len());
@@ -501,7 +559,7 @@ fn collect_release_mods(cfg: &Config) -> Result<Vec<FileEntry>> {
 /// Читает modlist.toml, скачивает каждый мод в кэш (`<work>/modcache`), считает
 /// и при наличии сверяет SHA-256, и возвращает `FileEntry` с ВНЕШНИМ url.
 /// Сами jar'ы в dist не копируются — лаунчер качает их напрямую по url.
-fn collect_external_mods(cfg: &Config) -> Result<Vec<FileEntry>> {
+fn collect_external_mods(cfg: &Config, sides: &Sides) -> Result<Vec<FileEntry>> {
     let Some(list_path) = &cfg.modlist else {
         return Ok(Vec::new());
     };
@@ -559,6 +617,7 @@ fn collect_external_mods(cfg: &Config) -> Result<Vec<FileEntry>> {
             sha256,
             size: fs::metadata(&cached)?.len(),
             kind: "mod".to_string(),
+            side: sides.side_for(&m.file)?.to_string(),
         });
     }
     println!("сторонних модов из modlist: {}", out.len());
@@ -637,6 +696,7 @@ fn parse_args() -> Result<Config> {
     let mut base_url = "https://example.com/kingdomrp".to_string();
     let mut mod_jar = PathBuf::from("../../krp-mod/build/libs/kingdomrpcore-0.1.0.jar");
     let mut modlist: Option<PathBuf> = None;
+    let mut sides: Option<PathBuf> = None;
     let mut mods_release: Option<String> = None;
     let mut mods_tag = "v1".to_string();
     let mut modlist_only = false;
@@ -665,6 +725,11 @@ fn parse_args() -> Result<Config> {
                     args.next().ok_or_else(|| anyhow!("--modlist requires value"))?,
                 ))
             }
+            "--sides" => {
+                sides = Some(PathBuf::from(
+                    args.next().ok_or_else(|| anyhow!("--sides requires value"))?,
+                ))
+            }
             "--mods-release" => {
                 mods_release =
                     Some(args.next().ok_or_else(|| anyhow!("--mods-release requires value"))?)
@@ -682,7 +747,7 @@ fn parse_args() -> Result<Config> {
             "--skip-jre" => skip_jre = true,
             "--skip-authlib" => skip_authlib = true,
             "-h" | "--help" => {
-                println!("krp-builder --base-url URL [--mod-jar PATH]\n  Сторонние моды: [--modlist modlist.toml] [--mods-release owner/repo] [--mods-tag v1] [--modlist-only]\n  Прочее: [--mc 1.21.1] [--neoforge 21.1.233] [--version 1.0.0] [--out dist] [--work build-work] [--skip-install] [--skip-jre] [--skip-authlib]");
+                println!("krp-builder --base-url URL [--mod-jar PATH]\n  Сторонние моды: [--modlist modlist.toml] [--mods-release owner/repo] [--mods-tag v1] [--sides sides.toml] [--modlist-only]\n  Прочее: [--mc 1.21.1] [--neoforge 21.1.233] [--version 1.0.0] [--out dist] [--work build-work] [--skip-install] [--skip-jre] [--skip-authlib]");
                 std::process::exit(0);
             }
             other => bail!("неизвестный аргумент: {other}"),
@@ -695,6 +760,7 @@ fn parse_args() -> Result<Config> {
         base_url,
         mod_jar,
         modlist,
+        sides,
         mods_release,
         mods_tag,
         modlist_only,
