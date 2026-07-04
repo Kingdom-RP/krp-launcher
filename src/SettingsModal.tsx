@@ -46,7 +46,11 @@ export function SettingsModal({
         setLoaded(true);
       })
       .catch((e) => onToast("error", `Не удалось загрузить настройки: ${e}`));
-  }, [onToast]);
+    // Грузим ОДИН раз на открытии окна. onToast намеренно не в зависимостях:
+    // pushToast пересоздаётся на каждый рендер App (poll сервера/тосты) — иначе
+    // эффект перезагружал бы настройки и затирал несохранённый выбор.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Превью рекомендуемых обновляем при смене памяти (Xms/Xmx).
   const recommendedPreview = recommended.replace(
