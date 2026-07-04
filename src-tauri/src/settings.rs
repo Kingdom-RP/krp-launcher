@@ -30,6 +30,13 @@ pub struct Settings {
     /// Выделяемая игре память (МБ). Нет — берётся [`crate::config::DEFAULT_MAX_MEMORY_MB`].
     #[serde(default)]
     pub max_memory_mb: Option<u32>,
+    /// Использовать кастомную строку JVM-аргументов вместо рекомендуемых.
+    #[serde(default)]
+    pub use_custom_jvm: bool,
+    /// Кастомная строка JVM-аргументов (для опытных). Применяется при
+    /// `use_custom_jvm=true`.
+    #[serde(default)]
+    pub custom_jvm_args: Option<String>,
 }
 
 fn settings_path(app: &AppHandle) -> Result<PathBuf> {
@@ -91,10 +98,38 @@ pub fn max_memory_mb(app: &AppHandle) -> u32 {
     mb.clamp(crate::config::MIN_MEMORY_MB, crate::config::MAX_MEMORY_MB)
 }
 
-/// Запомнить память игры (МБ).
-pub fn set_max_memory_mb(app: &AppHandle, mb: u32) -> Result<()> {
+/// Ведущие JVM-аргументы для запуска: кастомная строка (если включена и непустая)
+/// либо рекомендуемые (`-Xms/-Xmx` из настройки памяти + `config::JVM_PERF_ARGS`).
+pub fn jvm_args(app: &AppHandle) -> Vec<String> {
+    let s = load(app);
+    if s.use_custom_jvm {
+        if let Some(custom) = s.custom_jvm_args.as_ref() {
+            let args: Vec<String> = custom.split_whitespace().map(str::to_owned).collect();
+            if !args.is_empty() {
+                return args;
+            }
+        }
+    }
+    let mb = s
+        .max_memory_mb
+        .unwrap_or(crate::config::DEFAULT_MAX_MEMORY_MB)
+        .clamp(crate::config::MIN_MEMORY_MB, crate::config::MAX_MEMORY_MB);
+    let mut out = vec![format!("-Xms{mb}M"), format!("-Xmx{mb}M")];
+    out.extend(crate::config::JVM_PERF_ARGS.iter().map(|s| s.to_string()));
+    out
+}
+
+/// Сохранить настройки запуска: память + режим/строка кастомных JVM-аргументов.
+pub fn set_launch(
+    app: &AppHandle,
+    memory_mb: u32,
+    use_custom_jvm: bool,
+    custom_jvm_args: Option<String>,
+) -> Result<()> {
     let mut s = load(app);
-    s.max_memory_mb = Some(mb.clamp(crate::config::MIN_MEMORY_MB, crate::config::MAX_MEMORY_MB));
+    s.max_memory_mb = Some(memory_mb.clamp(crate::config::MIN_MEMORY_MB, crate::config::MAX_MEMORY_MB));
+    s.use_custom_jvm = use_custom_jvm;
+    s.custom_jvm_args = custom_jvm_args.filter(|v| !v.trim().is_empty());
     save(app, &s)
 }
 

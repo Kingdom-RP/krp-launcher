@@ -3,7 +3,6 @@ import {
   authAccount,
   confirmAction,
   getInstallDir,
-  getMemory,
   installGame,
   isGameInstalled,
   onGameExited,
@@ -13,7 +12,6 @@ import {
   play,
   resolveInstallDir,
   serverStatus,
-  setMemory,
   setInstallDir as persistInstallDir,
   uninstallGame,
   validateInstallPath,
@@ -24,6 +22,7 @@ import {
 } from "./lib/api";
 import { LoginScreen } from "./LoginScreen";
 import { SkinPanel } from "./SkinPanel";
+import { SettingsModal } from "./SettingsModal";
 import { checkUpdate, installUpdate, type Update } from "./lib/updater";
 import { getVersion } from "@tauri-apps/api/app";
 import { error as logError, info as logInfo } from "@tauri-apps/plugin-log";
@@ -71,9 +70,9 @@ function App() {
   // Статус игрового сервера (null = ещё не проверяли).
   const [server, setServer] = useState<ServerStatus | null>(null);
 
-  // Память игры (МБ) + границы ползунка.
-  const [memory, setMemoryState] = useState(4096);
-  const [memRange, setMemRange] = useState({ min: 2048, max: 16384 });
+  // Меню доп-функций (бургер) + окно настроек.
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
 
   // Тосты-уведомления.
   const [toasts, setToasts] = useState<Toast[]>([]);
@@ -134,30 +133,6 @@ function App() {
       unlisten.then((fn) => fn());
     };
   }, []);
-
-  // Загрузка настройки памяти при старте.
-  useEffect(() => {
-    getMemory()
-      .then((m) => {
-        setMemoryState(m.value);
-        setMemRange({ min: m.min, max: m.max });
-      })
-      .catch(() => {});
-  }, []);
-
-  // Сохранение памяти с задержкой (не писать на каждый тик ползунка).
-  const [memLoaded, setMemLoaded] = useState(false);
-  useEffect(() => {
-    if (!memLoaded) {
-      setMemLoaded(true);
-      return;
-    }
-    const id = window.setTimeout(() => {
-      setMemory(memory).catch(() => {});
-    }, 400);
-    return () => window.clearTimeout(id);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [memory]);
 
   // Пуллинг статуса сервера: при старте и каждые 30с. Тост показываем только на
   // переходе онлайн→оффлайн (не спамим при каждой проверке).
@@ -326,7 +301,11 @@ function App() {
     }
   }
 
-  const pathOk = (validation?.valid ?? false) && installDir.length > 0;
+  // Проверка записи в папку нужна при ВЫБОРЕ места установки. Если игра уже
+  // установлена — не блокируем «Играть» из-за неё (транзиент/Controlled Folder
+  // Access у dev-сборки и т.п.): файлы на месте, запуск в основном читает.
+  const pathOk =
+    installDir.length > 0 && (installed || (validation?.valid ?? false));
   const canAct = phase !== "syncing" && pathOk;
 
   const overallProgress =
@@ -393,38 +372,23 @@ function App() {
           </div>
         </section>
 
-        {/* Память игры */}
-        <section className="row mem-row">
-          <div className="path-info">
-            <span className="label">Память игры</span>
-            <span className="path-value">{(memory / 1024).toFixed(1)} ГБ</span>
-          </div>
-          <input
-            className="mem-slider"
-            type="range"
-            min={memRange.min}
-            max={memRange.max}
-            step={512}
-            value={memory}
-            disabled={phase === "syncing"}
-            onChange={(e) => setMemoryState(Number(e.target.value))}
-          />
-        </section>
-
         {/* Скин: 3D-превью + загрузка */}
         <SkinPanel account={account} onToast={pushToast} disabled={phase === "syncing"} />
 
-        {/* Ошибки/предупреждения валидации пути */}
-        {validation?.errors.map((msg) => (
-          <p key={msg} className="msg error">
-            ⛔ {msg}
-          </p>
-        ))}
-        {validation?.warnings.map((msg) => (
-          <p key={msg} className="msg warn">
-            ⚠️ {msg}
-          </p>
-        ))}
+        {/* Ошибки/предупреждения валидации пути — только пока игра НЕ установлена
+            (при выборе места). Для установленной игры путь фиксирован. */}
+        {!installed &&
+          validation?.errors.map((msg) => (
+            <p key={msg} className="msg error">
+              ⛔ {msg}
+            </p>
+          ))}
+        {!installed &&
+          validation?.warnings.map((msg) => (
+            <p key={msg} className="msg warn">
+              ⚠️ {msg}
+            </p>
+          ))}
 
         {/* Прогресс установки: общий объём + скорость */}
         {phase === "syncing" && (
@@ -478,34 +442,68 @@ function App() {
           {version && <span className="version">v{version}</span>}
         </span>
         <div className="footer-right">
-          {installed && (
-            <button
-              className="folder-btn"
-              title="Удалить игру"
-              disabled={phase === "syncing"}
-              onClick={onUninstall}
-            >
-              🗑️
-            </button>
+          {menuOpen && (
+            <>
+              <div className="menu-backdrop" onClick={() => setMenuOpen(false)} />
+              <div className="fn-menu">
+                <button
+                  className="fn-item"
+                  onClick={() => {
+                    setMenuOpen(false);
+                    setShowSettings(true);
+                  }}
+                >
+                  ⚙️ Настройки
+                </button>
+                <button
+                  className="fn-item"
+                  disabled={!installDir}
+                  onClick={() => {
+                    setMenuOpen(false);
+                    onOpenFolder();
+                  }}
+                >
+                  📁 Открыть папку
+                </button>
+                <button
+                  className="fn-item"
+                  disabled={checkingUpdate}
+                  onClick={() => {
+                    setMenuOpen(false);
+                    onCheckUpdate();
+                  }}
+                >
+                  🔄 Проверить обновление
+                </button>
+                {installed && (
+                  <button
+                    className="fn-item danger"
+                    disabled={phase === "syncing"}
+                    onClick={() => {
+                      setMenuOpen(false);
+                      onUninstall();
+                    }}
+                  >
+                    🗑️ Удалить игру
+                  </button>
+                )}
+              </div>
+            </>
           )}
           <button
             className="folder-btn"
-            title="Проверить обновление лаунчера"
-            disabled={checkingUpdate}
-            onClick={onCheckUpdate}
+            title="Меню"
+            onClick={() => setMenuOpen((v) => !v)}
           >
-            🔄
-          </button>
-          <button
-            className="folder-btn"
-            title="Открыть папку игры"
-            disabled={!installDir}
-            onClick={onOpenFolder}
-          >
-            📁
+            ☰
           </button>
         </div>
       </footer>
+
+      {/* Окно настроек */}
+      {showSettings && (
+        <SettingsModal onClose={() => setShowSettings(false)} onToast={pushToast} />
+      )}
 
       {/* Тосты-уведомления */}
       <div className="toast-stack">

@@ -61,13 +61,145 @@ body {
 }
 
 .mem-slider {
-  flex: 1;
-  max-width: 260px;
+  width: 100%;
   accent-color: var(--accent);
   cursor: pointer;
 }
-.mem-row .path-info {
-  min-width: 130px;
+
+/* ── Бургер-меню доп-функций ── */
+.footer-right {
+  position: relative;
+}
+.menu-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+}
+.fn-menu {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 8px);
+  z-index: 50;
+  display: flex;
+  flex-direction: column;
+  min-width: 210px;
+  padding: 6px;
+  gap: 2px;
+  background: var(--bg-2);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 10px;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.45);
+}
+.fn-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 12px;
+  border: none;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--text);
+  font-size: 0.9rem;
+  text-align: left;
+  cursor: pointer;
+}
+.fn-item:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.06);
+}
+.fn-item:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.fn-item.danger:hover:not(:disabled) {
+  background: rgba(255, 107, 107, 0.15);
+  color: var(--error);
+}
+
+/* ── Модальное окно настроек ── */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.55);
+}
+.modal {
+  width: min(520px, 92vw);
+  max-height: 88vh;
+  overflow-y: auto;
+  background: var(--bg-1);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 14px;
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.55);
+}
+.modal-head,
+.modal-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 18px;
+}
+.modal-head h2 {
+  margin: 0;
+  font-size: 1.15rem;
+}
+.modal-foot {
+  gap: 10px;
+  justify-content: flex-end;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+}
+.modal-body {
+  padding: 4px 18px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+.set-block {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.set-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.radio {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  font-size: 0.92rem;
+}
+.radio input {
+  accent-color: var(--accent);
+}
+.jvm-preview {
+  display: block;
+  padding: 8px 10px;
+  background: var(--bg-0);
+  border-radius: 7px;
+  font-size: 0.76rem;
+  color: var(--text-dim);
+  word-break: break-all;
+}
+.jvm-input {
+  width: 100%;
+  padding: 8px 10px;
+  background: var(--bg-0);
+  color: var(--text);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 7px;
+  font-family: monospace;
+  font-size: 0.82rem;
+  resize: vertical;
+}
+.play.small {
+  padding: 8px 18px;
+  font-size: 0.9rem;
+  letter-spacing: 0.02em;
 }
 
 .server-status {

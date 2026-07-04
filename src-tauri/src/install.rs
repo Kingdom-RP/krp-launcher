@@ -361,7 +361,7 @@ pub async fn play(
             None => None,
         };
 
-    let memory_mb = settings::max_memory_mb(app);
+    let jvm_prefix = settings::jvm_args(app);
 
     // launch блокирует поток (спавн + короткое ожидание раннего краха) —
     // уносим в blocking-пул, чтобы не вешать async-исполнитель.
@@ -382,7 +382,7 @@ pub async fn play(
             &java_exe,
             &player_name,
             online.as_ref(),
-            memory_mb,
+            &jvm_prefix,
         )
     })
     .await

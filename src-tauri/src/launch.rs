@@ -189,7 +189,7 @@ pub fn build_args(
     neoforge_profile_rel: &str,
     player_name: &str,
     online: Option<&OnlineAuth>,
-    memory_mb: u32,
+    jvm_prefix: &[String],
 ) -> Result<Vec<String>> {
     let vanilla_path = install_dir
         .join("versions")
@@ -283,10 +283,8 @@ pub fn build_args(
     };
 
     let mut cmd_args: Vec<String> = Vec::new();
-    // Память + рекомендуемые JVM-флаги производительности (клиент). Идут первыми.
-    cmd_args.push(format!("-Xms{memory_mb}M"));
-    cmd_args.push(format!("-Xmx{memory_mb}M"));
-    cmd_args.extend(crate::config::JVM_PERF_ARGS.iter().map(|s| s.to_string()));
+    // Ведущие JVM-аргументы (память+G1GC или кастомные из настроек). Идут первыми.
+    cmd_args.extend(jvm_prefix.iter().cloned());
     // JVM: ваниль + NeoForge.
     cmd_args.extend(collect_str(&vanilla.arguments, |a| &a.jvm));
     cmd_args.extend(collect_str(&forge.arguments, |a| &a.jvm));
@@ -342,9 +340,9 @@ pub fn launch(
     java_exe: &Path,
     player_name: &str,
     online: Option<&OnlineAuth>,
-    memory_mb: u32,
+    jvm_prefix: &[String],
 ) -> Result<std::process::Child> {
-    let cmd_args = build_args(install_dir, mc_version, neoforge_profile_rel, player_name, online, memory_mb)?;
+    let cmd_args = build_args(install_dir, mc_version, neoforge_profile_rel, player_name, online, jvm_prefix)?;
 
     let logs_dir = install_dir.join("logs");
     std::fs::create_dir_all(&logs_dir).ok();
@@ -425,7 +423,7 @@ mod tests {
             "versions/neoforge-21.1.233/neoforge-21.1.233.json",
             "Tester",
             None,
-            4096,
+            &["-Xmx4096M".to_string(), "-XX:+UseG1GC".to_string()],
         )
         .expect("build_args");
         let joined = args.join(" ");

@@ -23,21 +23,32 @@ export function serverStatus(): Promise<ServerStatus> {
   return invoke<ServerStatus>("server_status");
 }
 
-/** Настройка памяти игры (МБ) + границы ползунка. */
-export interface MemorySettings {
-  value: number;
-  min: number;
-  max: number;
+/** Настройки запуска (окно настроек): память + JVM-режим. */
+export interface LaunchSettings {
+  memory_mb: number;
+  min_memory: number;
+  max_memory: number;
+  use_custom_jvm: boolean;
+  custom_jvm_args: string;
+  recommended_jvm: string;
 }
 
-/** Текущая выделяемая память + границы. */
-export function getMemory(): Promise<MemorySettings> {
-  return invoke<MemorySettings>("get_memory");
+/** Прочитать настройки запуска. */
+export function getLaunchSettings(): Promise<LaunchSettings> {
+  return invoke<LaunchSettings>("get_launch_settings");
 }
 
-/** Запомнить выделяемую игре память (МБ). */
-export function setMemory(mb: number): Promise<void> {
-  return invoke<void>("set_memory", { mb });
+/** Сохранить настройки запуска (память + JVM-режим/строка). */
+export function setLaunchSettings(
+  memoryMb: number,
+  useCustomJvm: boolean,
+  customJvmArgs: string,
+): Promise<void> {
+  return invoke<void>("set_launch_settings", {
+    memoryMb,
+    useCustomJvm,
+    customJvmArgs,
+  });
 }
 
 /** Показать системный диалог выбора каталога установки.

@@ -221,28 +221,47 @@ fn open_dir(path: String) -> Result<()> {
     Ok(())
 }
 
-/// Настройка памяти игры (МБ): текущее значение + границы ползунка для UI.
+/// Настройки запуска для окна настроек: память (+границы) и JVM-режим.
 #[derive(serde::Serialize)]
-struct MemorySettings {
-    value: u32,
-    min: u32,
-    max: u32,
+struct LaunchSettings {
+    memory_mb: u32,
+    min_memory: u32,
+    max_memory: u32,
+    use_custom_jvm: bool,
+    custom_jvm_args: String,
+    /// Рекомендуемые JVM-аргументы (для показа в UI при выборе «рекомендуемые»).
+    recommended_jvm: String,
 }
 
-/// Текущая выделяемая память + допустимые границы.
+/// Прочитать настройки запуска.
 #[tauri::command]
-fn get_memory(app: tauri::AppHandle) -> MemorySettings {
-    MemorySettings {
-        value: settings::max_memory_mb(&app),
-        min: config::MIN_MEMORY_MB,
-        max: config::MAX_MEMORY_MB,
+fn get_launch_settings(app: tauri::AppHandle) -> LaunchSettings {
+    let s = settings::load(&app);
+    let recommended = {
+        let mb = settings::max_memory_mb(&app);
+        let mut v = vec![format!("-Xms{mb}M"), format!("-Xmx{mb}M")];
+        v.extend(config::JVM_PERF_ARGS.iter().map(|s| s.to_string()));
+        v.join(" ")
+    };
+    LaunchSettings {
+        memory_mb: settings::max_memory_mb(&app),
+        min_memory: config::MIN_MEMORY_MB,
+        max_memory: config::MAX_MEMORY_MB,
+        use_custom_jvm: s.use_custom_jvm,
+        custom_jvm_args: s.custom_jvm_args.unwrap_or_default(),
+        recommended_jvm: recommended,
     }
 }
 
-/// Запомнить выделяемую игре память (МБ).
+/// Сохранить настройки запуска (память + JVM-режим/строка).
 #[tauri::command]
-fn set_memory(app: tauri::AppHandle, mb: u32) -> Result<()> {
-    settings::set_max_memory_mb(&app, mb)
+fn set_launch_settings(
+    app: tauri::AppHandle,
+    memory_mb: u32,
+    use_custom_jvm: bool,
+    custom_jvm_args: String,
+) -> Result<()> {
+    settings::set_launch(&app, memory_mb, use_custom_jvm, Some(custom_jvm_args))
 }
 
 /// Статус игрового MC-сервера (онлайн + число игроков) через Server List Ping.
@@ -424,8 +443,8 @@ pub fn run() {
             auth_logout,
             upload_skin,
             server_status,
-            get_memory,
-            set_memory,
+            get_launch_settings,
+            set_launch_settings,
             is_game_installed,
             uninstall_game,
             validate_install_path,
