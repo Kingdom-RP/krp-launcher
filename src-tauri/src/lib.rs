@@ -8,6 +8,7 @@ mod launch;
 mod manifest;
 mod paths;
 mod progress;
+mod server;
 mod settings;
 mod skin;
 mod vanilla;
@@ -220,6 +221,13 @@ fn open_dir(path: String) -> Result<()> {
     Ok(())
 }
 
+/// Статус игрового MC-сервера (онлайн + число игроков) через Server List Ping.
+/// Никогда не падает: при недоступности отдаёт `online: false`.
+#[tauri::command]
+async fn server_status() -> server::ServerStatus {
+    server::status().await
+}
+
 /// Установлена ли игра в указанной папке (JRE + ванильный client.jar на месте).
 /// Нужна фронтенду, чтобы подписать кнопку «Играть» или «Установить».
 #[tauri::command]
@@ -391,6 +399,7 @@ pub fn run() {
             auth_login,
             auth_logout,
             upload_skin,
+            server_status,
             is_game_installed,
             uninstall_game,
             validate_install_path,

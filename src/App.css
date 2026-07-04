@@ -60,6 +60,35 @@ body {
   text-shadow: 0 2px 24px rgba(200, 162, 74, 0.25);
 }
 
+.server-status {
+  margin-top: 0.7rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  font-size: 0.85rem;
+  letter-spacing: 0.03em;
+  color: var(--text-dim);
+}
+.server-status .dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--text-dim);
+}
+.server-status.online {
+  color: var(--ok);
+}
+.server-status.online .dot {
+  background: var(--ok);
+  box-shadow: 0 0 8px var(--ok);
+}
+.server-status.offline {
+  color: var(--text-dim);
+}
+.server-status.offline .dot {
+  background: var(--error);
+}
+
 .subtitle {
   margin: 0.4rem 0 0;
   color: var(--text-dim);

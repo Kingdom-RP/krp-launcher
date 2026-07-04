@@ -11,11 +11,13 @@ import {
   pickInstallDir,
   play,
   resolveInstallDir,
+  serverStatus,
   setInstallDir as persistInstallDir,
   uninstallGame,
   validateInstallPath,
   type AccountInfo,
   type PathValidation,
+  type ServerStatus,
   type SyncProgress,
 } from "./lib/api";
 import { LoginScreen } from "./LoginScreen";
@@ -63,6 +65,9 @@ function App() {
   // Авторизация: пока не вошёл — показываем экран логина.
   const [account, setAccount] = useState<AccountInfo | null>(null);
   const [authChecked, setAuthChecked] = useState(false);
+
+  // Статус игрового сервера (null = ещё не проверяли).
+  const [server, setServer] = useState<ServerStatus | null>(null);
 
   // Тосты-уведомления.
   const [toasts, setToasts] = useState<Toast[]>([]);
@@ -122,6 +127,29 @@ function App() {
     return () => {
       unlisten.then((fn) => fn());
     };
+  }, []);
+
+  // Пуллинг статуса сервера: при старте и каждые 30с. Тост показываем только на
+  // переходе онлайн→оффлайн (не спамим при каждой проверке).
+  useEffect(() => {
+    let prevOnline: boolean | null = null;
+    let active = true;
+    async function poll() {
+      const s = await serverStatus().catch(() => null);
+      if (!active || !s) return;
+      if (prevOnline === true && !s.online) {
+        pushToast("info", "Сервер недоступен — можно играть оффлайн");
+      }
+      prevOnline = s.online;
+      setServer(s);
+    }
+    poll();
+    const id = window.setInterval(poll, 30000);
+    return () => {
+      active = false;
+      window.clearInterval(id);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Проверка обновления лаунчера при старте. Ошибку (часто — недоступность
@@ -299,6 +327,14 @@ function App() {
 
       <header className="hero">
         <h1 className="title">KINGDOM&nbsp;RP</h1>
+        <div className={`server-status ${server ? (server.online ? "online" : "offline") : "unknown"}`}>
+          <span className="dot" />
+          {server === null
+            ? "Проверка сервера…"
+            : server.online
+              ? `Сервер онлайн · ${server.players_online}${server.players_max ? `/${server.players_max}` : ""} игроков`
+              : "Сервер оффлайн"}
+        </div>
       </header>
 
       <main className="panel">
@@ -381,7 +417,9 @@ function App() {
               ? "Запуск…"
               : "Установка…"
             : installed
-              ? "ИГРАТЬ"
+              ? server && !server.online
+                ? "ИГРАТЬ ОФФЛАЙН"
+                : "ИГРАТЬ"
               : "УСТАНОВИТЬ"}
         </button>
       </main>

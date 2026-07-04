@@ -10,6 +10,19 @@ export function openInstallDir(path: string): Promise<void> {
   return invoke<void>("open_dir", { path });
 }
 
+/** Статус игрового MC-сервера (server.rs::ServerStatus). */
+export interface ServerStatus {
+  online: boolean;
+  players_online: number;
+  players_max: number;
+}
+
+/** Проверить статус MC-сервера (онлайн + число игроков). Не бросает: при
+ *  недоступности возвращает `online:false`. */
+export function serverStatus(): Promise<ServerStatus> {
+  return invoke<ServerStatus>("server_status");
+}
+
 /** Показать системный диалог выбора каталога установки.
  *  Возвращает выбранный путь или `null`, если пользователь отменил выбор. */
 export async function pickInstallDir(defaultPath?: string): Promise<string | null> {

@@ -31,6 +31,19 @@ pub fn manifest_sig_url() -> String {
 /// см. `docs/manifest-signing.md`.
 pub const MANIFEST_PUBKEY: &str = "RWTVxCmeK8DmSTMj246tJXSGU2zYprKzwE8f+mM7aTkHUVqnzuUEKQ/X";
 
+/// Адрес игрового MC-сервера (host:port) для проверки статуса (Server List Ping)
+/// и подписи «Онлайн/Оффлайн» + текущего онлайна в лаунчере. Конфигурируемо, как
+/// и остальные адреса; при выезде на публичный сервер — сменить здесь.
+pub const SERVER_ADDR: &str = "localhost:25565";
+
+/// Разбить [`SERVER_ADDR`] на (host, port). Порт по умолчанию — 25565.
+pub fn server_host_port() -> (String, u16) {
+    match SERVER_ADDR.rsplit_once(':') {
+        Some((h, p)) => (h.to_string(), p.parse().unwrap_or(25565)),
+        None => (SERVER_ADDR.to_string(), 25565),
+    }
+}
+
 /// База auth-сервера (drasl, Yggdrasil-совместимый). Сейчас — локальный dev-инстанс;
 /// при выезде на публичный сервер меняем здесь (или оверрайдим через
 /// `settings.json` → `auth_base_url` для теста без пересборки). Отсюда же строится
