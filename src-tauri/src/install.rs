@@ -33,6 +33,8 @@ fn friendly_label(kind: manifest::FileKind, verb: &str) -> String {
         manifest::FileKind::Library | manifest::FileKind::Client => "NeoForge",
         manifest::FileKind::Config => "конфигурацию",
         manifest::FileKind::Asset => "ресурсы",
+        manifest::FileKind::Shaderpack => "шейдеры",
+        manifest::FileKind::Unknown => "файлы Kingdom RP",
     };
     format!("{verb} {noun}")
 }
@@ -267,7 +269,8 @@ async fn sync_all(
 pub const GAME_EXITED_EVENT: &str = "game://exited";
 
 /// Записать дефолтный `options.txt` (язык — русский, онбординг Narrator'а
-/// выключен, масштаб интерфейса = 2), но ТОЛЬКО если файла ещё нет — чтобы не
+/// выключен, масштаб интерфейса = 2, полноэкранный режим), но ТОЛЬКО если файла
+/// ещё нет — чтобы не
 /// затирать настройки игрока. Minecraft при старте дочитает остальные ключи
 /// значениями по умолчанию.
 fn ensure_default_options(install_dir: &Path) {
@@ -275,7 +278,7 @@ fn ensure_default_options(install_dir: &Path) {
     if path.exists() {
         return;
     }
-    let content = "lang:ru_ru\nonboardAccessibility:false\nguiScale:2\n";
+    let content = "lang:ru_ru\nonboardAccessibility:false\nguiScale:2\nfullscreen:true\n";
     if let Err(e) = std::fs::write(&path, content) {
         log::warn!("не удалось записать options.txt: {e}");
     } else {

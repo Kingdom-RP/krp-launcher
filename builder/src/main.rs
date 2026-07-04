@@ -69,6 +69,9 @@ struct Config {
     base_url: String,
     mod_jar: PathBuf,
     modlist: Option<PathBuf>,
+    /// Шейдерпаки (.zip) — копируются как есть в `dist/shaderpacks/` (НЕ
+    /// распаковываются). Лаунчер кладёт их в `shaderpacks/` папки игры.
+    shaderpacks: Vec<PathBuf>,
     /// Путь к sides.toml (client/server-списки). Нет — все моды "both".
     sides: Option<PathBuf>,
     /// Репо `owner/name`, из Release которого автоматически берутся сторонние моды.
@@ -166,6 +169,22 @@ fn main() -> Result<()> {
     fs::create_dir_all(&dist_mods)?;
     fs::copy(&cfg.mod_jar, dist_mods.join(&mod_name))?;
     println!("мод: mods/{mod_name}");
+
+    // 3a) шейдерпаки (.zip) — копируем как есть в dist/shaderpacks/ (НЕ распаковываем).
+    if !cfg.shaderpacks.is_empty() {
+        let dist_shaders = dist.join("shaderpacks");
+        fs::create_dir_all(&dist_shaders)?;
+        for sp in &cfg.shaderpacks {
+            if !sp.is_file() {
+                bail!("шейдерпак не найден: {}", sp.display());
+            }
+            let name = sp
+                .file_name()
+                .ok_or_else(|| anyhow!("плохое имя шейдерпака"))?;
+            fs::copy(sp, dist_shaders.join(name))?;
+            println!("шейдерпак: shaderpacks/{}", name.to_string_lossy());
+        }
+    }
 
     // 3b) authlib-injector.jar — Java-агент авторизации (фаза 6). Хостим у себя
     // (его релизы на GitHub в РФ режутся); качаем с официального maven yushi.moe.
@@ -272,6 +291,8 @@ fn main() -> Result<()> {
             "mod"
         } else if rel.starts_with("config/") {
             "config"
+        } else if rel.starts_with("shaderpacks/") {
+            "shaderpack"
         } else {
             "library"
         };
@@ -696,6 +717,7 @@ fn parse_args() -> Result<Config> {
     let mut base_url = "https://example.com/kingdomrp".to_string();
     let mut mod_jar = PathBuf::from("../../krp-mod/build/libs/kingdomrpcore-0.1.0.jar");
     let mut modlist: Option<PathBuf> = None;
+    let mut shaderpacks: Vec<PathBuf> = Vec::new();
     let mut sides: Option<PathBuf> = None;
     let mut mods_release: Option<String> = None;
     let mut mods_tag = "v1".to_string();
@@ -725,6 +747,9 @@ fn parse_args() -> Result<Config> {
                     args.next().ok_or_else(|| anyhow!("--modlist requires value"))?,
                 ))
             }
+            "--shaderpack" => shaderpacks.push(PathBuf::from(
+                args.next().ok_or_else(|| anyhow!("--shaderpack requires value"))?,
+            )),
             "--sides" => {
                 sides = Some(PathBuf::from(
                     args.next().ok_or_else(|| anyhow!("--sides requires value"))?,
@@ -747,7 +772,7 @@ fn parse_args() -> Result<Config> {
             "--skip-jre" => skip_jre = true,
             "--skip-authlib" => skip_authlib = true,
             "-h" | "--help" => {
-                println!("krp-builder --base-url URL [--mod-jar PATH]\n  Сторонние моды: [--modlist modlist.toml] [--mods-release owner/repo] [--mods-tag v1] [--sides sides.toml] [--modlist-only]\n  Прочее: [--mc 1.21.1] [--neoforge 21.1.233] [--version 1.0.0] [--out dist] [--work build-work] [--skip-install] [--skip-jre] [--skip-authlib]");
+                println!("krp-builder --base-url URL [--mod-jar PATH]\n  Сторонние моды: [--modlist modlist.toml] [--mods-release owner/repo] [--mods-tag v1] [--sides sides.toml] [--modlist-only]\n  Шейдеры: [--shaderpack pack.zip] (повторяемо, кладётся в shaderpacks/)\n  Прочее: [--mc 1.21.1] [--neoforge 21.1.233] [--version 1.0.0] [--out dist] [--work build-work] [--skip-install] [--skip-jre] [--skip-authlib]");
                 std::process::exit(0);
             }
             other => bail!("неизвестный аргумент: {other}"),
@@ -760,6 +785,7 @@ fn parse_args() -> Result<Config> {
         base_url,
         mod_jar,
         modlist,
+        shaderpacks,
         sides,
         mods_release,
         mods_tag,

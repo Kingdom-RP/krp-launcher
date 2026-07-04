@@ -99,6 +99,11 @@ pub enum FileKind {
     Config,
     Asset,
     Client,
+    Shaderpack,
+    /// Неизвестный kind из более нового манифеста — чтобы старый лаунчер не падал
+    /// на разборе (forward-compat). Файл всё равно качается по path/sha.
+    #[serde(other)]
+    Unknown,
 }
 
 /// Скачать и разобрать манифест по URL. Манифест маленький — ограничиваем
