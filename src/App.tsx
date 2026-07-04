@@ -347,23 +347,6 @@ function App() {
       </header>
 
       <main className="panel">
-        {/* Путь установки */}
-        <section className="row path-row">
-          <div className="path-info">
-            <span className="label">Папка установки</span>
-            <span className="path-value" title={installDir}>
-              {installDir || "…"}
-            </span>
-          </div>
-          <button
-            className="ghost"
-            disabled={phase === "syncing"}
-            onClick={onChangePath}
-          >
-            Изменить
-          </button>
-        </section>
-
         {/* Аккаунт игрока */}
         <section className="row">
           <div className="path-info">
@@ -491,7 +474,7 @@ function App() {
             </>
           )}
           <button
-            className="folder-btn"
+            className="folder-btn burger-btn"
             title="Меню"
             onClick={() => setMenuOpen((v) => !v)}
           >
@@ -502,7 +485,13 @@ function App() {
 
       {/* Окно настроек */}
       {showSettings && (
-        <SettingsModal onClose={() => setShowSettings(false)} onToast={pushToast} />
+        <SettingsModal
+          onClose={() => setShowSettings(false)}
+          onToast={pushToast}
+          installDir={installDir}
+          onChangePath={onChangePath}
+          busy={phase === "syncing"}
+        />
       )}
 
       {/* Тосты-уведомления */}

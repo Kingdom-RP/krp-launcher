@@ -38,6 +38,12 @@ export function getLaunchSettings(): Promise<LaunchSettings> {
   return invoke<LaunchSettings>("get_launch_settings");
 }
 
+/** Проверить кастомную строку JVM-аргументов (гоняет java -version). Бросает с
+ *  сообщением JVM, если аргументы неверные. */
+export function validateJvmArgs(installDir: string, args: string): Promise<void> {
+  return invoke<void>("validate_jvm_args", { installDir, args });
+}
+
 /** Сохранить настройки запуска (память + JVM-режим/строка). */
 export function setLaunchSettings(
   memoryMb: number,

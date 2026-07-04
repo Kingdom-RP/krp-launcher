@@ -67,6 +67,13 @@ body {
 }
 
 /* ── Бургер-меню доп-функций ── */
+.burger-btn {
+  color: #fff;
+  font-size: 1.4rem;
+}
+.burger-btn:not(:disabled):hover {
+  color: var(--accent-hi);
+}
 .footer-right {
   position: relative;
 }

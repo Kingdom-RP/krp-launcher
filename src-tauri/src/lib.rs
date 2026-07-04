@@ -253,6 +253,48 @@ fn get_launch_settings(app: tauri::AppHandle) -> LaunchSettings {
     }
 }
 
+/// Проверить кастомную строку JVM-аргументов: гоняет `java <args> -version` на
+/// установленной JRE — невалидный флаг JVM отклонит сама (быстро, exit≠0). Если
+/// JRE ещё не установлена — проверку пропускаем (Ok), проверится при запуске.
+#[tauri::command]
+async fn validate_jvm_args(install_dir: String, args: String) -> Result<()> {
+    let tokens: Vec<String> = args.split_whitespace().map(str::to_owned).collect();
+    if tokens.is_empty() {
+        return Err(error::LauncherError::Other("Строка аргументов пустая".into()));
+    }
+    let java_exe = java::java_exe_path(Path::new(&install_dir), "runtime");
+    if !java_exe.exists() {
+        return Ok(()); // нечем проверить — не блокируем сохранение
+    }
+    tokio::task::spawn_blocking(move || {
+        use std::process::Command;
+        let mut cmd = Command::new(&java_exe);
+        cmd.args(&tokens).arg("-version");
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+            cmd.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
+        }
+        let out = cmd
+            .output()
+            .map_err(|e| error::LauncherError::Other(format!("не запустить java: {e}")))?;
+        if out.status.success() {
+            Ok(())
+        } else {
+            let stderr = String::from_utf8_lossy(&out.stderr);
+            // Берём первую значимую строку ошибки JVM.
+            let msg = stderr
+                .lines()
+                .find(|l| !l.trim().is_empty())
+                .unwrap_or("JVM отклонила аргументы")
+                .to_string();
+            Err(error::LauncherError::Other(format!("Неверные аргументы: {msg}")))
+        }
+    })
+    .await
+    .map_err(|e| error::LauncherError::Other(format!("задача проверки прервана: {e}")))?
+}
+
 /// Сохранить настройки запуска (память + JVM-режим/строка).
 #[tauri::command]
 fn set_launch_settings(
@@ -445,6 +487,7 @@ pub fn run() {
             server_status,
             get_launch_settings,
             set_launch_settings,
+            validate_jvm_args,
             is_game_installed,
             uninstall_game,
             validate_install_path,
