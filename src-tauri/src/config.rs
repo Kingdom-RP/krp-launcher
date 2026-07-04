@@ -68,6 +68,8 @@ pub const JVM_PERF_ARGS: &[&str] = &[
     "-XX:G1ReservePercent=20",
     "-XX:MaxGCPauseMillis=50",
     "-XX:G1HeapRegionSize=32M",
+    "-XX:+ParallelRefProcEnabled",
+    "-XX:+DisableExplicitGC",
 ];
 
 /// Целевая версия NeoForge (артефакт `net.neoforged:neoforge:<NEOFORGE_VERSION>`).
