@@ -53,6 +53,23 @@ pub const AUTH_BASE_URL: &str = "http://localhost:25585";
 /// Целевая версия Minecraft (ваниль тянется с Mojang по этой версии).
 pub const MINECRAFT_VERSION: &str = "1.21.1";
 
+/// Память клиента по умолчанию (МБ), если игрок не задал своё.
+pub const DEFAULT_MAX_MEMORY_MB: u32 = 4096;
+/// Границы ползунка памяти в UI (МБ).
+pub const MIN_MEMORY_MB: u32 = 2048;
+pub const MAX_MEMORY_MB: u32 = 16384;
+
+/// Рекомендуемые JVM-аргументы производительности для КЛИЕНТА (G1GC-твики,
+/// Java 21, моддед). Память (`-Xms/-Xmx`) добавляется отдельно из настроек.
+pub const JVM_PERF_ARGS: &[&str] = &[
+    "-XX:+UnlockExperimentalVMOptions",
+    "-XX:+UseG1GC",
+    "-XX:G1NewSizePercent=20",
+    "-XX:G1ReservePercent=20",
+    "-XX:MaxGCPauseMillis=50",
+    "-XX:G1HeapRegionSize=32M",
+];
+
 /// Целевая версия NeoForge (артефакт `net.neoforged:neoforge:<NEOFORGE_VERSION>`).
 /// Справочная константа (фактическую версию запуска лаунчер берёт из манифеста).
 #[allow(dead_code)]

@@ -3,6 +3,7 @@ import {
   authAccount,
   confirmAction,
   getInstallDir,
+  getMemory,
   installGame,
   isGameInstalled,
   onGameExited,
@@ -12,6 +13,7 @@ import {
   play,
   resolveInstallDir,
   serverStatus,
+  setMemory,
   setInstallDir as persistInstallDir,
   uninstallGame,
   validateInstallPath,
@@ -68,6 +70,10 @@ function App() {
 
   // Статус игрового сервера (null = ещё не проверяли).
   const [server, setServer] = useState<ServerStatus | null>(null);
+
+  // Память игры (МБ) + границы ползунка.
+  const [memory, setMemoryState] = useState(4096);
+  const [memRange, setMemRange] = useState({ min: 2048, max: 16384 });
 
   // Тосты-уведомления.
   const [toasts, setToasts] = useState<Toast[]>([]);
@@ -128,6 +134,30 @@ function App() {
       unlisten.then((fn) => fn());
     };
   }, []);
+
+  // Загрузка настройки памяти при старте.
+  useEffect(() => {
+    getMemory()
+      .then((m) => {
+        setMemoryState(m.value);
+        setMemRange({ min: m.min, max: m.max });
+      })
+      .catch(() => {});
+  }, []);
+
+  // Сохранение памяти с задержкой (не писать на каждый тик ползунка).
+  const [memLoaded, setMemLoaded] = useState(false);
+  useEffect(() => {
+    if (!memLoaded) {
+      setMemLoaded(true);
+      return;
+    }
+    const id = window.setTimeout(() => {
+      setMemory(memory).catch(() => {});
+    }, 400);
+    return () => window.clearTimeout(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [memory]);
 
   // Пуллинг статуса сервера: при старте и каждые 30с. Тост показываем только на
   // переходе онлайн→оффлайн (не спамим при каждой проверке).
@@ -361,6 +391,24 @@ function App() {
             <span className="label">Аккаунт</span>
             <span className="path-value">{account.player_name}</span>
           </div>
+        </section>
+
+        {/* Память игры */}
+        <section className="row mem-row">
+          <div className="path-info">
+            <span className="label">Память игры</span>
+            <span className="path-value">{(memory / 1024).toFixed(1)} ГБ</span>
+          </div>
+          <input
+            className="mem-slider"
+            type="range"
+            min={memRange.min}
+            max={memRange.max}
+            step={512}
+            value={memory}
+            disabled={phase === "syncing"}
+            onChange={(e) => setMemoryState(Number(e.target.value))}
+          />
         </section>
 
         {/* Скин: 3D-превью + загрузка */}

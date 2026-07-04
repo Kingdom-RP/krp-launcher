@@ -361,6 +361,8 @@ pub async fn play(
             None => None,
         };
 
+    let memory_mb = settings::max_memory_mb(app);
+
     // launch блокирует поток (спавн + короткое ожидание раннего краха) —
     // уносим в blocking-пул, чтобы не вешать async-исполнитель.
     let child = tokio::task::spawn_blocking(move || {
@@ -380,6 +382,7 @@ pub async fn play(
             &java_exe,
             &player_name,
             online.as_ref(),
+            memory_mb,
         )
     })
     .await

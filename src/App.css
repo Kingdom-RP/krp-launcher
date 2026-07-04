@@ -60,6 +60,16 @@ body {
   text-shadow: 0 2px 24px rgba(200, 162, 74, 0.25);
 }
 
+.mem-slider {
+  flex: 1;
+  max-width: 260px;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+.mem-row .path-info {
+  min-width: 130px;
+}
+
 .server-status {
   margin-top: 0.7rem;
   display: inline-flex;

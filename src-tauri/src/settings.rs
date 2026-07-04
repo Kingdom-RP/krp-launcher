@@ -27,6 +27,9 @@ pub struct Settings {
     /// Необязательный оверрайд адреса auth-сервера (для теста без пересборки).
     #[serde(default)]
     pub auth_base_url: Option<String>,
+    /// Выделяемая игре память (МБ). Нет — берётся [`crate::config::DEFAULT_MAX_MEMORY_MB`].
+    #[serde(default)]
+    pub max_memory_mb: Option<u32>,
 }
 
 fn settings_path(app: &AppHandle) -> Result<PathBuf> {
@@ -77,6 +80,21 @@ pub fn set_player_name(app: &AppHandle, name: Option<String>) -> Result<()> {
 pub fn set_account(app: &AppHandle, account: Option<crate::auth::Account>) -> Result<()> {
     let mut s = load(app);
     s.account = account;
+    save(app, &s)
+}
+
+/// Память игры (МБ): из настроек или дефолт, с зажимом в допустимые границы.
+pub fn max_memory_mb(app: &AppHandle) -> u32 {
+    let mb = load(app)
+        .max_memory_mb
+        .unwrap_or(crate::config::DEFAULT_MAX_MEMORY_MB);
+    mb.clamp(crate::config::MIN_MEMORY_MB, crate::config::MAX_MEMORY_MB)
+}
+
+/// Запомнить память игры (МБ).
+pub fn set_max_memory_mb(app: &AppHandle, mb: u32) -> Result<()> {
+    let mut s = load(app);
+    s.max_memory_mb = Some(mb.clamp(crate::config::MIN_MEMORY_MB, crate::config::MAX_MEMORY_MB));
     save(app, &s)
 }
 

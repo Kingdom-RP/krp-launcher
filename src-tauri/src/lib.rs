@@ -221,6 +221,30 @@ fn open_dir(path: String) -> Result<()> {
     Ok(())
 }
 
+/// Настройка памяти игры (МБ): текущее значение + границы ползунка для UI.
+#[derive(serde::Serialize)]
+struct MemorySettings {
+    value: u32,
+    min: u32,
+    max: u32,
+}
+
+/// Текущая выделяемая память + допустимые границы.
+#[tauri::command]
+fn get_memory(app: tauri::AppHandle) -> MemorySettings {
+    MemorySettings {
+        value: settings::max_memory_mb(&app),
+        min: config::MIN_MEMORY_MB,
+        max: config::MAX_MEMORY_MB,
+    }
+}
+
+/// Запомнить выделяемую игре память (МБ).
+#[tauri::command]
+fn set_memory(app: tauri::AppHandle, mb: u32) -> Result<()> {
+    settings::set_max_memory_mb(&app, mb)
+}
+
 /// Статус игрового MC-сервера (онлайн + число игроков) через Server List Ping.
 /// Никогда не падает: при недоступности отдаёт `online: false`.
 #[tauri::command]
@@ -400,6 +424,8 @@ pub fn run() {
             auth_logout,
             upload_skin,
             server_status,
+            get_memory,
+            set_memory,
             is_game_installed,
             uninstall_game,
             validate_install_path,

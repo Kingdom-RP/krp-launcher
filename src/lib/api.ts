@@ -23,6 +23,23 @@ export function serverStatus(): Promise<ServerStatus> {
   return invoke<ServerStatus>("server_status");
 }
 
+/** Настройка памяти игры (МБ) + границы ползунка. */
+export interface MemorySettings {
+  value: number;
+  min: number;
+  max: number;
+}
+
+/** Текущая выделяемая память + границы. */
+export function getMemory(): Promise<MemorySettings> {
+  return invoke<MemorySettings>("get_memory");
+}
+
+/** Запомнить выделяемую игре память (МБ). */
+export function setMemory(mb: number): Promise<void> {
+  return invoke<void>("set_memory", { mb });
+}
+
 /** Показать системный диалог выбора каталога установки.
  *  Возвращает выбранный путь или `null`, если пользователь отменил выбор. */
 export async function pickInstallDir(defaultPath?: string): Promise<string | null> {
