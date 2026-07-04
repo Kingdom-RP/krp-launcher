@@ -208,6 +208,24 @@ body {
   font-size: 0.9rem;
   letter-spacing: 0.02em;
 }
+/* Кнопки подвала окна к одной высоте (border-box учитывает рамку .ghost). */
+.modal-foot button {
+  margin: 0;
+  padding: 8px 18px;
+  font-size: 0.9rem;
+  line-height: 1.25;
+  box-sizing: border-box;
+}
+.modal-foot .play:disabled {
+  opacity: 0.45;
+  box-shadow: none;
+  cursor: default;
+}
+.foot-hint {
+  margin-right: auto;
+  color: var(--text-dim);
+  font-size: 0.78rem;
+}
 
 .server-status {
   margin-top: 0.7rem;

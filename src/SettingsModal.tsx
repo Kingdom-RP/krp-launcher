@@ -30,6 +30,9 @@ export function SettingsModal({
   const [recommended, setRecommended] = useState("");
   const [saving, setSaving] = useState(false);
   const [checking, setChecking] = useState(false);
+  // Кастомная строка прошла проверку (гейт кнопки «Сохранить»). При загрузке
+  // сохранённые кастомные аргументы уже валидны (их проверяли при сохранении).
+  const [validated, setValidated] = useState(false);
 
   useEffect(() => {
     getLaunchSettings()
@@ -39,6 +42,7 @@ export function SettingsModal({
         setUseCustom(s.use_custom_jvm);
         setCustom(s.custom_jvm_args);
         setRecommended(s.recommended_jvm);
+        setValidated(s.use_custom_jvm); // сохранённые кастомные уже валидны
         setLoaded(true);
       })
       .catch((e) => onToast("error", `Не удалось загрузить настройки: ${e}`));
@@ -54,8 +58,10 @@ export function SettingsModal({
     setChecking(true);
     try {
       await validateJvmArgs(installDir, custom);
+      setValidated(true);
       onToast("ok", "Аргументы корректны");
     } catch (e) {
+      setValidated(false);
       onToast("error", String(e));
     } finally {
       setChecking(false);
@@ -165,7 +171,10 @@ export function SettingsModal({
                     spellCheck={false}
                     placeholder="-Xmx6G -XX:+UseG1GC …"
                     value={custom}
-                    onChange={(e) => setCustom(e.target.value)}
+                    onChange={(e) => {
+                      setCustom(e.target.value);
+                      setValidated(false); // изменили → нужна повторная проверка
+                    }}
                   />
                   <button
                     className="ghost small"
@@ -181,10 +190,17 @@ export function SettingsModal({
         )}
 
         <div className="modal-foot">
+          {useCustom && !validated && (
+            <span className="foot-hint">Проверьте аргументы перед сохранением</span>
+          )}
           <button className="ghost" onClick={onClose} disabled={saving}>
             Отмена
           </button>
-          <button className="play small" onClick={onSave} disabled={saving || !loaded}>
+          <button
+            className="play small"
+            onClick={onSave}
+            disabled={saving || !loaded || (useCustom && !validated)}
+          >
             {saving ? "Сохранение…" : "Сохранить"}
           </button>
         </div>

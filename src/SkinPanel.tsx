@@ -107,7 +107,7 @@ export function SkinPanel({
           Тонкая модель
         </label>
         <button className="ghost" disabled={disabled || busy} onClick={onPick}>
-          Выбрать PNG…
+          Выбрать файл скина
         </button>
         <button
           className="ghost"
