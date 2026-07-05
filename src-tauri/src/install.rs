@@ -261,7 +261,60 @@ async fn sync_all(
     // Narrator'а) — только если игрок ещё не создавал свой options.txt.
     ensure_default_options(install_dir);
 
+    // Прописать наш сервер в список мультиплеера (servers.dat).
+    ensure_server_entry(install_dir);
+
     Ok(java_exe)
+}
+
+/// Добавить наш сервер (`config::SERVER_ADDR`) в `servers.dat` (несжатый NBT —
+/// список сохранённых серверов мультиплеера), если его там ещё нет. Чужие
+/// сервера игрока сохраняются как есть (парсим через `fastnbt::Value`). Наш
+/// entry ставим первым. Форс-добавление при каждом sync: удалил в игре — вернём.
+fn ensure_server_entry(install_dir: &Path) {
+    use fastnbt::Value;
+    use std::collections::HashMap;
+
+    let path = install_dir.join("servers.dat");
+    let mut map: HashMap<String, Value> = std::fs::read(&path)
+        .ok()
+        .and_then(|b| fastnbt::from_bytes::<Value>(&b).ok())
+        .and_then(|v| match v {
+            Value::Compound(m) => Some(m),
+            _ => None,
+        })
+        .unwrap_or_default();
+
+    let mut servers: Vec<Value> = match map.remove("servers") {
+        Some(Value::List(l)) => l,
+        _ => Vec::new(),
+    };
+
+    let present = servers.iter().any(|e| {
+        matches!(e, Value::Compound(c)
+            if matches!(c.get("ip"), Some(Value::String(ip)) if ip == config::SERVER_ADDR))
+    });
+
+    if present {
+        return; // уже есть — ничего не пишем
+    }
+
+    let mut entry = HashMap::new();
+    entry.insert("name".to_string(), Value::String(config::SERVER_NAME.to_string()));
+    entry.insert("ip".to_string(), Value::String(config::SERVER_ADDR.to_string()));
+    servers.insert(0, Value::Compound(entry));
+    map.insert("servers".to_string(), Value::List(servers));
+
+    match fastnbt::to_bytes(&Value::Compound(map)) {
+        Ok(bytes) => {
+            if let Err(e) = std::fs::write(&path, bytes) {
+                log::warn!("servers.dat: не записать: {e}");
+            } else {
+                log::info!("servers.dat: прописан сервер {}", config::SERVER_ADDR);
+            }
+        }
+        Err(e) => log::warn!("servers.dat: не сериализовать NBT: {e}"),
+    }
 }
 
 /// Событие «игра завершилась» — фронтенд по нему сбрасывает состояние, а окно

@@ -36,6 +36,9 @@ pub const MANIFEST_PUBKEY: &str = "RWTVxCmeK8DmSTMj246tJXSGU2zYprKzwE8f+mM7aTkHU
 /// и остальные адреса; при выезде на публичный сервер — сменить здесь.
 pub const SERVER_ADDR: &str = "localhost:25565";
 
+/// Имя сервера в списке мультиплеера (`servers.dat`), которое лаунчер прописывает.
+pub const SERVER_NAME: &str = "Kingdom RP";
+
 /// Разбить [`SERVER_ADDR`] на (host, port). Порт по умолчанию — 25565.
 pub fn server_host_port() -> (String, u16) {
     match SERVER_ADDR.rsplit_once(':') {

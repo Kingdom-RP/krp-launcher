@@ -45,6 +45,8 @@ zip = { version = "2", default-features = false, features = ["deflate"] }
 # Распаковка JRE под Linux/macOS (Adoptium отдаёт .tar.gz, не .zip).
 flate2 = "1"
 tar = "0.4"
+# Чтение/запись servers.dat (несжатый NBT) — прописать наш сервер в список.
+fastnbt = "2"
 
 [dev-dependencies]
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
