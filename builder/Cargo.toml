@@ -17,6 +17,7 @@ hex = "0.4"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 toml = "0.8"
+zip = { version = "2", default-features = false, features = ["deflate"] }
 walkdir = "2"
 anyhow = "1"
 # Подпись manifest.json (minisign, prehashed). Лаунчер проверяет тем же форматом

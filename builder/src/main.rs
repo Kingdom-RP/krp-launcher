@@ -41,6 +41,10 @@ struct Manifest {
     authlib_injector: Option<String>,
     java: BTreeMap<String, JavaEntry>,
     files: Vec<FileEntry>,
+    /// modId клиентских (side=client) модов, включая вложенные JiJ. Серверный
+    /// синк пишет их в extraAllowedMods (анти-чит whitelist krp-mod).
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    client_mod_ids: Vec<String>,
 }
 
 #[derive(Serialize)]
@@ -313,6 +317,8 @@ fn main() -> Result<()> {
     files.sort_by(|a, b| a.path.cmp(&b.path));
     println!("всего файлов в манифесте: {}", files.len());
 
+    let cids = client_mod_ids(&cfg, &files)?;
+    println!("client modId (для whitelist): {}", cids.len());
     let manifest = Manifest {
         version: cfg.modpack_version.clone(),
         minecraft: cfg.mc.clone(),
@@ -321,6 +327,7 @@ fn main() -> Result<()> {
         authlib_injector,
         java,
         files,
+        client_mod_ids: cids,
     };
     let manifest_path = dist.join("manifest.json");
     write_and_sign_manifest(&manifest_path, &manifest)?;
@@ -410,6 +417,75 @@ struct ModEntry {
     sha256: Option<String>,
 }
 
+/// modId клиентских модов (side=client) из кэша, включая вложенные JiJ.
+/// Идут в manifest.client_mod_ids → серверный синк пишет их в extraAllowedMods.
+fn client_mod_ids(cfg: &Config, files: &[FileEntry]) -> Result<Vec<String>> {
+    let cache = cfg.work.join("modcache");
+    let mut ids = std::collections::BTreeSet::new();
+    for f in files {
+        if f.kind != "mod" || f.side != "client" {
+            continue;
+        }
+        let name = f.path.rsplit('/').next().unwrap_or(&f.path);
+        let jar = cache.join(name);
+        if !jar.is_file() {
+            eprintln!("client_mod_ids: нет в кэше {} — пропуск", jar.display());
+            continue;
+        }
+        for id in scan_mod_ids(&jar)? {
+            ids.insert(id);
+        }
+    }
+    Ok(ids.into_iter().collect())
+}
+
+/// modId из jar: собственные (META-INF/neoforge.mods.toml) + вложенные JiJ.
+fn scan_mod_ids(jar: &Path) -> Result<Vec<String>> {
+    let f = fs::File::open(jar)?;
+    let mut zip = zip::ZipArchive::new(std::io::BufReader::new(f))
+        .with_context(|| format!("zip {}", jar.display()))?;
+    let mut out = Vec::new();
+    if let Ok(mut e) = zip.by_name("META-INF/neoforge.mods.toml") {
+        let mut s = String::new();
+        std::io::Read::read_to_string(&mut e, &mut s)?;
+        out.extend(mod_ids_from_toml(&s));
+    }
+    let nested: Vec<String> = (0..zip.len())
+        .filter_map(|i| zip.by_index(i).ok().map(|e| e.name().to_string()))
+        .filter(|n| n.starts_with("META-INF/jarjar/") && n.ends_with(".jar"))
+        .collect();
+    for name in nested {
+        let mut buf = Vec::new();
+        {
+            let mut e = zip.by_name(&name)?;
+            std::io::Read::read_to_end(&mut e, &mut buf)?;
+        }
+        if let Ok(mut inner) = zip::ZipArchive::new(std::io::Cursor::new(buf)) {
+            if let Ok(mut te) = inner.by_name("META-INF/neoforge.mods.toml") {
+                let mut s = String::new();
+                std::io::Read::read_to_string(&mut te, &mut s)?;
+                out.extend(mod_ids_from_toml(&s));
+            }
+        }
+    }
+    Ok(out)
+}
+
+/// modId из секций [[mods]] содержимого neoforge.mods.toml (зависимости игнор).
+fn mod_ids_from_toml(text: &str) -> Vec<String> {
+    let Ok(val) = text.parse::<toml::Value>() else {
+        return Vec::new();
+    };
+    val.get("mods")
+        .and_then(|m| m.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|m| m.get("modId").and_then(|v| v.as_str()).map(String::from))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
 /// Режим `--modlist-only`: только сторонние моды, без NeoForge/JRE/dist.
 /// Пишет минимальный manifest (моды + версии MC/NeoForge) для быстрой проверки.
 fn run_modlist_only(cfg: &Config) -> Result<()> {
@@ -419,6 +495,7 @@ fn run_modlist_only(cfg: &Config) -> Result<()> {
         bail!("нет модов: укажи --modlist <toml> и/или --mods-release <owner/repo>");
     }
     fs::create_dir_all(&cfg.out)?;
+    let cids = client_mod_ids(cfg, &files)?;
     let manifest = Manifest {
         version: cfg.modpack_version.clone(),
         minecraft: cfg.mc.clone(),
@@ -427,6 +504,7 @@ fn run_modlist_only(cfg: &Config) -> Result<()> {
         authlib_injector: None,
         java: BTreeMap::new(),
         files,
+        client_mod_ids: cids,
     };
     let manifest_path = cfg.out.join("manifest.json");
     write_and_sign_manifest(&manifest_path, &manifest)?;
