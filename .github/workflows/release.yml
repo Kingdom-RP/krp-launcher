@@ -83,3 +83,43 @@ jobs:
           releaseBody: "Обновление лаунчера установится автоматически."
           releaseDraft: false
           prerelease: false
+
+  # После сборки обеих платформ: убрать .sig из ассетов (авто-обновление их не
+  # использует — подпись лежит в latest.json) и добавить копию установщика со
+  # стабильным именем для постоянной ссылки на скачивание последней версии.
+  finalize:
+    needs: release
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      TAG: ${{ github.ref_name }}
+      REPO: ${{ github.repository }}
+    steps:
+      - name: Stable-named installer copy
+        run: |
+          tmp=$(mktemp -d)
+          assets=$(gh release view "$TAG" -R "$REPO" --json assets -q '.assets[].name')
+          # Windows NSIS-установщик → KingdomRP-Setup.exe
+          exe=$(echo "$assets" | grep -E '_x64-setup\.exe$' | head -1)
+          if [ -n "$exe" ]; then
+            gh release download "$TAG" -R "$REPO" -p "$exe" -D "$tmp"
+            cp "$tmp/$exe" "$tmp/KingdomRP-Setup.exe"
+            gh release upload "$TAG" -R "$REPO" "$tmp/KingdomRP-Setup.exe" --clobber
+          fi
+          # Linux AppImage → KingdomRP.AppImage
+          appimg=$(echo "$assets" | grep -E '\.AppImage$' | head -1)
+          if [ -n "$appimg" ]; then
+            gh release download "$TAG" -R "$REPO" -p "$appimg" -D "$tmp"
+            cp "$tmp/$appimg" "$tmp/KingdomRP.AppImage"
+            gh release upload "$TAG" -R "$REPO" "$tmp/KingdomRP.AppImage" --clobber
+          fi
+
+      - name: Remove .sig assets
+        run: |
+          for a in $(gh release view "$TAG" -R "$REPO" --json assets -q '.assets[].name' | grep -E '\.sig$'); do
+            echo "delete $a"
+            gh release delete-asset "$TAG" "$a" -R "$REPO" -y
+          done
