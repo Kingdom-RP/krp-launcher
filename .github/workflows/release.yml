@@ -63,6 +63,13 @@ jobs:
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
 
+      # Кэш Rust-сборки (registry + target). Первый прогон наполняет кэш,
+      # последующие релизы компилируются заметно быстрее. Ключ — по платформе.
+      - name: Cache Rust
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
       - name: Install frontend deps
         run: npm ci
 
@@ -72,6 +79,7 @@ jobs:
         run: node scripts/set-version.mjs ${{ github.ref_name }}
 
       - name: Build, sign & release
+        id: tauri
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -84,9 +92,28 @@ jobs:
           releaseDraft: false
           prerelease: false
 
+      # Стабильно-именованная копия установщика этой платформы — из локальных
+      # артефактов сборки (без повторного скачивания). Даёт постоянную ссылку
+      # .../releases/latest/download/KingdomRP-Setup.exe|KingdomRP.AppImage
+      - name: Stable-named copy
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          echo '${{ steps.tauri.outputs.artifactPaths }}' | jq -r '.[]' | while read -r p; do
+            case "$p" in
+              *setup.exe)  cp "$p" "$(dirname "$p")/KingdomRP-Setup.exe"
+                           gh release upload "$TAG" "$(dirname "$p")/KingdomRP-Setup.exe" --clobber ;;
+              *.AppImage)  cp "$p" "$(dirname "$p")/KingdomRP.AppImage"
+                           gh release upload "$TAG" "$(dirname "$p")/KingdomRP.AppImage" --clobber ;;
+            esac
+          done
+
   # После сборки обеих платформ: убрать .sig из ассетов (авто-обновление их не
-  # использует — подпись лежит в latest.json) и добавить копию установщика со
-  # стабильным именем для постоянной ссылки на скачивание последней версии.
+  # использует — подпись лежит в latest.json). Стабильно-именованные копии уже
+  # залиты в build-джобах. Лёгкий шаг: только чистка .sig, без скачиваний.
   finalize:
     needs: release
     if: startsWith(github.ref, 'refs/tags/v')
@@ -98,25 +125,6 @@ jobs:
       TAG: ${{ github.ref_name }}
       REPO: ${{ github.repository }}
     steps:
-      - name: Stable-named installer copy
-        run: |
-          tmp=$(mktemp -d)
-          assets=$(gh release view "$TAG" -R "$REPO" --json assets -q '.assets[].name')
-          # Windows NSIS-установщик → KingdomRP-Setup.exe
-          exe=$(echo "$assets" | grep -E '_x64-setup\.exe$' | head -1)
-          if [ -n "$exe" ]; then
-            gh release download "$TAG" -R "$REPO" -p "$exe" -D "$tmp"
-            cp "$tmp/$exe" "$tmp/KingdomRP-Setup.exe"
-            gh release upload "$TAG" -R "$REPO" "$tmp/KingdomRP-Setup.exe" --clobber
-          fi
-          # Linux AppImage → KingdomRP.AppImage
-          appimg=$(echo "$assets" | grep -E '\.AppImage$' | head -1)
-          if [ -n "$appimg" ]; then
-            gh release download "$TAG" -R "$REPO" -p "$appimg" -D "$tmp"
-            cp "$tmp/$appimg" "$tmp/KingdomRP.AppImage"
-            gh release upload "$TAG" -R "$REPO" "$tmp/KingdomRP.AppImage" --clobber
-          fi
-
       - name: Remove .sig assets
         run: |
           for a in $(gh release view "$TAG" -R "$REPO" --json assets -q '.assets[].name' | grep -E '\.sig$'); do
