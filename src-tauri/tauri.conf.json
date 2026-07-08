@@ -38,7 +38,7 @@
           "https://objects.githubusercontent.com",
           "https://*.mojang.com",
           "https://*.minecraft.net",
-          "http://localhost:25585"
+          "https://45.87.121.82.nip.io"
         ]
       }
     }

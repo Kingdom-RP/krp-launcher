@@ -51,7 +51,7 @@ pub fn server_host_port() -> (String, u16) {
 /// при выезде на публичный сервер меняем здесь (или оверрайдим через
 /// `settings.json` → `auth_base_url` для теста без пересборки). Отсюда же строится
 /// URL для `authlib-injector` (`<base>/authlib-injector`).
-pub const AUTH_BASE_URL: &str = "http://localhost:25585";
+pub const AUTH_BASE_URL: &str = "https://45.87.121.82.nip.io";
 
 /// Целевая версия Minecraft (ваниль тянется с Mojang по этой версии).
 pub const MINECRAFT_VERSION: &str = "1.21.1";
