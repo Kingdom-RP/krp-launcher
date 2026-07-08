@@ -23,6 +23,26 @@ pub enum SkinFormat {
 /// Сигнатура PNG (первые 8 байт файла).
 const PNG_SIGNATURE: [u8; 8] = [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A];
 
+/// Максимальный размер файла скина. Скин Minecraft 64×64 PNG — единицы КБ;
+/// 512 КБ — с большим запасом. Защита от «скин на 1 ГБ» (OOM лаунчера + мусор
+/// на auth-сервере): проверяем ДО чтения файла в память.
+pub const MAX_SKIN_BYTES: u64 = 512 * 1024;
+
+/// Прочитать файл скина с лимитом размера (проверка по метаданным ДО чтения).
+pub fn read_skin_file(path: &std::path::Path) -> Result<Vec<u8>> {
+    let meta = std::fs::metadata(path)
+        .map_err(|e| LauncherError::Other(format!("не прочитать файл скина: {e}")))?;
+    if meta.len() > MAX_SKIN_BYTES {
+        return Err(LauncherError::Other(format!(
+            "Файл слишком большой ({} КБ). Скин Minecraft — это маленький PNG 64×64 \
+             (до {} КБ).",
+            meta.len() / 1024,
+            MAX_SKIN_BYTES / 1024
+        )));
+    }
+    std::fs::read(path).map_err(|e| LauncherError::Other(format!("не прочитать файл скина: {e}")))
+}
+
 /// Прочитать ширину/высоту из заголовка PNG (chunk `IHDR`). Возвращает ошибку,
 /// если это не PNG или заголовок повреждён.
 fn png_dimensions(bytes: &[u8]) -> Result<(u32, u32)> {
@@ -44,6 +64,10 @@ fn png_dimensions(bytes: &[u8]) -> Result<(u32, u32)> {
 /// Проверить, что байты — корректный PNG-скин. Возвращает формат или понятную
 /// ошибку (которую можно показать игроку), если это не развёртка скина.
 pub fn validate_skin(bytes: &[u8]) -> Result<SkinFormat> {
+    // Защита в глубину: даже если пришли байты напрямую — не крупнее лимита.
+    if bytes.len() as u64 > MAX_SKIN_BYTES {
+        return Err(LauncherError::Other("Файл скина слишком большой.".into()));
+    }
     let (w, h) = png_dimensions(bytes)?;
     match (w, h) {
         (64, 64) => Ok(SkinFormat::Modern),
@@ -57,8 +81,7 @@ pub fn validate_skin(bytes: &[u8]) -> Result<SkinFormat> {
 
 /// Прочитать файл и проверить, что это PNG-скин.
 pub fn validate_skin_file(path: &std::path::Path) -> Result<SkinFormat> {
-    let bytes = std::fs::read(path)
-        .map_err(|e| LauncherError::Other(format!("не прочитать файл скина: {e}")))?;
+    let bytes = read_skin_file(path)?;
     validate_skin(&bytes)
 }
 
@@ -96,5 +119,13 @@ mod tests {
     fn rejects_non_png() {
         assert!(validate_skin(b"not a png at all, just text......").is_err());
         assert!(validate_skin(&[0u8; 4]).is_err()); // слишком короткий
+    }
+
+    #[test]
+    fn rejects_oversized() {
+        // Валидный заголовок 64×64, но раздутый файл больше лимита → отказ.
+        let mut big = png_header(64, 64);
+        big.resize((MAX_SKIN_BYTES + 1) as usize, 0);
+        assert!(validate_skin(&big).is_err());
     }
 }

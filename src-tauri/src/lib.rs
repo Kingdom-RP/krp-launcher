@@ -132,8 +132,7 @@ async fn upload_skin(
     path: String,
     slim: bool,
 ) -> Result<()> {
-    let bytes = std::fs::read(&path)
-        .map_err(|e| error::LauncherError::Other(format!("не прочитать файл: {e}")))?;
+    let bytes = skin::read_skin_file(Path::new(&path))?; // лимит размера ДО чтения
     skin::validate_skin(&bytes)?; // отклоняем не-скины ещё до отправки
     let account = settings::load(&app)
         .account
@@ -164,8 +163,7 @@ fn png_data_url(bytes: &[u8]) -> String {
 /// webview рисует картинку без проблем с доступом к файлу/CORS.
 #[tauri::command]
 fn skin_preview_file(path: String) -> Result<String> {
-    let bytes = std::fs::read(&path)
-        .map_err(|e| error::LauncherError::Other(format!("не прочитать файл: {e}")))?;
+    let bytes = skin::read_skin_file(Path::new(&path))?; // лимит размера ДО чтения
     skin::validate_skin(&bytes)?;
     Ok(png_data_url(&bytes))
 }
