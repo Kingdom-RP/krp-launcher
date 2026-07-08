@@ -92,28 +92,9 @@ jobs:
           releaseDraft: false
           prerelease: false
 
-      # Стабильно-именованная копия установщика этой платформы — из локальных
-      # артефактов сборки (без повторного скачивания). Даёт постоянную ссылку
-      # .../releases/latest/download/KingdomRP-Setup.exe|KingdomRP.AppImage
-      - name: Stable-named copy
-        if: startsWith(github.ref, 'refs/tags/v')
-        shell: bash
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAG: ${{ github.ref_name }}
-        run: |
-          echo '${{ steps.tauri.outputs.artifactPaths }}' | jq -r '.[]' | while read -r p; do
-            case "$p" in
-              *setup.exe)  cp "$p" "$(dirname "$p")/KingdomRP-Setup.exe"
-                           gh release upload "$TAG" "$(dirname "$p")/KingdomRP-Setup.exe" --clobber ;;
-              *.AppImage)  cp "$p" "$(dirname "$p")/KingdomRP.AppImage"
-                           gh release upload "$TAG" "$(dirname "$p")/KingdomRP.AppImage" --clobber ;;
-            esac
-          done
-
-  # После сборки обеих платформ: убрать .sig из ассетов (авто-обновление их не
-  # использует — подпись лежит в latest.json). Стабильно-именованные копии уже
-  # залиты в build-джобах. Лёгкий шаг: только чистка .sig, без скачиваний.
+  # После сборки обеих платформ (ubuntu — без Windows-путей): добавить копии
+  # установщиков со стабильными именами для постоянной ссылки и убрать .sig
+  # (авто-обновление их не использует — подпись в latest.json).
   finalize:
     needs: release
     if: startsWith(github.ref, 'refs/tags/v')
@@ -125,6 +106,23 @@ jobs:
       TAG: ${{ github.ref_name }}
       REPO: ${{ github.repository }}
     steps:
+      - name: Stable-named installer copies
+        run: |
+          tmp=$(mktemp -d)
+          assets=$(gh release view "$TAG" -R "$REPO" --json assets -q '.assets[].name')
+          exe=$(echo "$assets" | grep -E '_x64-setup\.exe$' | head -1)
+          if [ -n "$exe" ]; then
+            gh release download "$TAG" -R "$REPO" -p "$exe" -D "$tmp"
+            cp "$tmp/$exe" "$tmp/KingdomRP-Setup.exe"
+            gh release upload "$TAG" -R "$REPO" "$tmp/KingdomRP-Setup.exe" --clobber
+          fi
+          appimg=$(echo "$assets" | grep -E '\.AppImage$' | grep -v '^KingdomRP\.AppImage$' | head -1)
+          if [ -n "$appimg" ]; then
+            gh release download "$TAG" -R "$REPO" -p "$appimg" -D "$tmp"
+            cp "$tmp/$appimg" "$tmp/KingdomRP.AppImage"
+            gh release upload "$TAG" -R "$REPO" "$tmp/KingdomRP.AppImage" --clobber
+          fi
+
       - name: Remove .sig assets
         run: |
           for a in $(gh release view "$TAG" -R "$REPO" --json assets -q '.assets[].name' | grep -E '\.sig$'); do
