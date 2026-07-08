@@ -106,26 +106,38 @@ jobs:
       TAG: ${{ github.ref_name }}
       REPO: ${{ github.repository }}
     steps:
-      - name: Stable-named installer copies
+      # Переименовать установщики в version-less, переписать url в latest.json на
+      # них (подпись по содержимому — валидна), удалить версионные + .sig.
+      # Итог: KingdomRP-Setup.exe, KingdomRP.AppImage, latest.json.
+      - name: Version-less assets + patch latest.json
         run: |
+          set -e
           tmp=$(mktemp -d)
           assets=$(gh release view "$TAG" -R "$REPO" --json assets -q '.assets[].name')
           exe=$(echo "$assets" | grep -E '_x64-setup\.exe$' | head -1)
+          appimg=$(echo "$assets" | grep -E '_amd64\.AppImage$' | head -1)
+
           if [ -n "$exe" ]; then
             gh release download "$TAG" -R "$REPO" -p "$exe" -D "$tmp"
             cp "$tmp/$exe" "$tmp/KingdomRP-Setup.exe"
             gh release upload "$TAG" -R "$REPO" "$tmp/KingdomRP-Setup.exe" --clobber
           fi
-          appimg=$(echo "$assets" | grep -E '\.AppImage$' | grep -v '^KingdomRP\.AppImage$' | head -1)
           if [ -n "$appimg" ]; then
             gh release download "$TAG" -R "$REPO" -p "$appimg" -D "$tmp"
             cp "$tmp/$appimg" "$tmp/KingdomRP.AppImage"
             gh release upload "$TAG" -R "$REPO" "$tmp/KingdomRP.AppImage" --clobber
           fi
 
-      - name: Remove .sig assets
-        run: |
-          for a in $(gh release view "$TAG" -R "$REPO" --json assets -q '.assets[].name' | grep -E '\.sig$'); do
+          # latest.json: url'ы → version-less имена (подпись не трогаем)
+          gh release download "$TAG" -R "$REPO" -p latest.json -D "$tmp"
+          sed -i -E \
+            -e 's#Kingdom\.RP\.Launcher_[^/"]*_x64-setup\.exe#KingdomRP-Setup.exe#g' \
+            -e 's#Kingdom\.RP\.Launcher_[^/"]*_amd64\.AppImage#KingdomRP.AppImage#g' \
+            "$tmp/latest.json"
+          gh release upload "$TAG" -R "$REPO" "$tmp/latest.json" --clobber
+
+          # удалить версионные установщики + все .sig
+          for a in $(echo "$assets" | grep -E '(_x64-setup\.exe|_amd64\.AppImage|\.sig)$'); do
             echo "delete $a"
             gh release delete-asset "$TAG" "$a" -R "$REPO" -y
           done
