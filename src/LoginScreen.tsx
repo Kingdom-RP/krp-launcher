@@ -10,15 +10,22 @@ const PASS_MIN = 8;
 export function LoginScreen({ onAuthed }: { onAuthed: (a: AccountInfo) => void }) {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
+  const [confirm, setConfirm] = useState("");
   const [busy, setBusy] = useState(false);
   const [errorMsg, setErrorMsg] = useState("");
 
   const nameOk = NAME_RE.test(username.trim());
   const passOk = password.length >= PASS_MIN;
+  const confirmOk = password === confirm;
   const canSubmit = !busy && nameOk && passOk;
 
   async function submit(mode: "login" | "register") {
     if (!canSubmit) return;
+    // При регистрации пароль и подтверждение должны совпадать.
+    if (mode === "register" && !confirmOk) {
+      setErrorMsg("Пароли не совпадают.");
+      return;
+    }
     setBusy(true);
     setErrorMsg("");
     logInfo(`UI: ${mode} '${username.trim()}'`);
@@ -75,8 +82,27 @@ export function LoginScreen({ onAuthed }: { onAuthed: (a: AccountInfo) => void }
           </div>
         </section>
 
+        <section className="row">
+          <div className="path-info">
+            <span className="label">Повторите пароль</span>
+            <input
+              className="path-input"
+              type="password"
+              value={confirm}
+              spellCheck={false}
+              placeholder="Ещё раз тот же пароль"
+              disabled={busy}
+              onChange={(e) => setConfirm(e.currentTarget.value)}
+              onKeyDown={(e) => e.key === "Enter" && submit("register")}
+            />
+          </div>
+        </section>
+
         {username.length > 0 && !nameOk && (
           <p className="msg error">⛔ Логин: латиница, цифры и _, 3–16 символов.</p>
+        )}
+        {confirm.length > 0 && !confirmOk && (
+          <p className="msg error">⛔ Пароли не совпадают.</p>
         )}
         {errorMsg && <p className="msg error">⛔ {errorMsg}</p>}
 
@@ -85,7 +111,7 @@ export function LoginScreen({ onAuthed }: { onAuthed: (a: AccountInfo) => void }
         </button>
         <button
           className="ghost"
-          disabled={!canSubmit}
+          disabled={!canSubmit || !confirmOk || confirm.length === 0}
           onClick={() => submit("register")}
         >
           Создать аккаунт
