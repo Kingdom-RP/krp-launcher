@@ -78,6 +78,10 @@ struct Config {
     shaderpacks: Vec<PathBuf>,
     /// Путь к sides.toml (client/server-списки). Нет — все моды "both".
     sides: Option<PathBuf>,
+    /// Папка конфигов модпака (копируется в dist/config, хостится на Pages).
+    config_dir: Option<PathBuf>,
+    /// config-sides.toml (сторона конфигов по подстроке пути). Нет — all both.
+    config_sides: Option<PathBuf>,
     /// Репо `owner/name`, из Release которого автоматически берутся сторонние моды.
     mods_release: Option<String>,
     /// Тег Release для `mods_release`.
@@ -173,6 +177,16 @@ fn main() -> Result<()> {
     fs::create_dir_all(&dist_mods)?;
     fs::copy(&cfg.mod_jar, dist_mods.join(&mod_name))?;
     println!("мод: mods/{mod_name}");
+
+    // 3c) конфиги модпака (из krp-modpack/config) → dist/config (хостятся на Pages).
+    if let Some(cd) = &cfg.config_dir {
+        if cd.is_dir() {
+            let n = copy_tree(cd, &dist.join("config"), |_| true)?;
+            println!("скопировано конфигов: {n}");
+        } else {
+            eprintln!("--config-dir {} не папка — пропуск", cd.display());
+        }
+    }
 
     // 3a) шейдерпаки (.zip) — копируем как есть в dist/shaderpacks/ (НЕ распаковываем).
     if !cfg.shaderpacks.is_empty() {
@@ -276,6 +290,8 @@ fn main() -> Result<()> {
     }
 
     // Обход dist/ → manifest (java/ исключаем — он идёт отдельной секцией `java`).
+    // Сторона конфигов — из config-sides.toml (по подстроке пути); остальное both.
+    let cfg_sides = Sides::load(cfg.config_sides.as_deref())?;
     let mut files = Vec::new();
     for entry in WalkDir::new(dist).into_iter().filter_map(|e| e.ok()) {
         if !entry.file_type().is_file() {
@@ -300,14 +316,19 @@ fn main() -> Result<()> {
         } else {
             "library"
         };
+        // Конфиги — сторона по config-sides; ядро NeoForge/мод — both.
+        let side = if let Some(rest) = rel.strip_prefix("config/") {
+            cfg_sides.side_for(rest)?
+        } else {
+            "both"
+        };
         files.push(FileEntry {
             url: format!("{}/{}", cfg.base_url.trim_end_matches('/'), rel),
             path: rel,
             sha256,
             size,
             kind: kind.to_string(),
-            // Ядро NeoForge + наш мод нужны обеим сторонам.
-            side: "both".to_string(),
+            side: side.to_string(),
         });
     }
     // Сторонние моды (modlist.toml и/или Release GitHub) — хостятся ВНЕ dist.
@@ -797,6 +818,8 @@ fn parse_args() -> Result<Config> {
     let mut modlist: Option<PathBuf> = None;
     let mut shaderpacks: Vec<PathBuf> = Vec::new();
     let mut sides: Option<PathBuf> = None;
+    let mut config_dir: Option<PathBuf> = None;
+    let mut config_sides: Option<PathBuf> = None;
     let mut mods_release: Option<String> = None;
     let mut mods_tag = "v1".to_string();
     let mut modlist_only = false;
@@ -833,6 +856,16 @@ fn parse_args() -> Result<Config> {
                     args.next().ok_or_else(|| anyhow!("--sides requires value"))?,
                 ))
             }
+            "--config-dir" => {
+                config_dir = Some(PathBuf::from(
+                    args.next().ok_or_else(|| anyhow!("--config-dir requires value"))?,
+                ))
+            }
+            "--config-sides" => {
+                config_sides = Some(PathBuf::from(
+                    args.next().ok_or_else(|| anyhow!("--config-sides requires value"))?,
+                ))
+            }
             "--mods-release" => {
                 mods_release =
                     Some(args.next().ok_or_else(|| anyhow!("--mods-release requires value"))?)
@@ -865,6 +898,8 @@ fn parse_args() -> Result<Config> {
         modlist,
         shaderpacks,
         sides,
+        config_dir,
+        config_sides,
         mods_release,
         mods_tag,
         modlist_only,
