@@ -34,7 +34,7 @@ pub const MANIFEST_PUBKEY: &str = "RWTVxCmeK8DmSTMj246tJXSGU2zYprKzwE8f+mM7aTkHU
 /// Адрес игрового MC-сервера (host:port) для проверки статуса (Server List Ping)
 /// и подписи «Онлайн/Оффлайн» + текущего онлайна в лаунчере. Конфигурируемо, как
 /// и остальные адреса; при выезде на публичный сервер — сменить здесь.
-pub const SERVER_ADDR: &str = "localhost:25565";
+pub const SERVER_ADDR: &str = "45.11.16.75:25061";
 
 /// Имя сервера в списке мультиплеера (`servers.dat`), которое лаунчер прописывает.
 pub const SERVER_NAME: &str = "Kingdom RP";
