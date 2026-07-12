@@ -460,12 +460,25 @@ fn client_mod_ids(cfg: &Config, files: &[FileEntry]) -> Result<Vec<String>> {
     Ok(ids.into_iter().collect())
 }
 
-/// modId из jar: собственные (META-INF/neoforge.mods.toml) + вложенные JiJ.
+/// modId из jar: собственные (META-INF/neoforge.mods.toml) + вложенные JiJ,
+/// РЕКУРСИВНО и в обоих layout вложенности:
+///   - META-INF/jarjar/ (NeoForge JiJ),
+///   - META-INF/jars/   (Fabric-toolchain JiJ, напр. LambDynLights: там сидят
+///                        spruceui/yumi_mc_core/pride/transition/trender и т.п.).
+/// Без рекурсии терялись субмоды на 2-3 уровне -> анти-чит кикал легит-клиентов.
 fn scan_mod_ids(jar: &Path) -> Result<Vec<String>> {
-    let f = fs::File::open(jar)?;
-    let mut zip = zip::ZipArchive::new(std::io::BufReader::new(f))
-        .with_context(|| format!("zip {}", jar.display()))?;
+    let bytes = fs::read(jar).with_context(|| format!("чтение {}", jar.display()))?;
     let mut out = Vec::new();
+    scan_jar_bytes(&bytes, &mut out).with_context(|| format!("zip {}", jar.display()))?;
+    out.sort();
+    out.dedup();
+    Ok(out)
+}
+
+/// Рекурсивный скан modId из байтов jar: собственный neoforge.mods.toml +
+/// вложенные jar (META-INF/jarjar/ и META-INF/jars/), спускаясь на все уровни.
+fn scan_jar_bytes(bytes: &[u8], out: &mut Vec<String>) -> Result<()> {
+    let mut zip = zip::ZipArchive::new(std::io::Cursor::new(bytes))?;
     if let Ok(mut e) = zip.by_name("META-INF/neoforge.mods.toml") {
         let mut s = String::new();
         std::io::Read::read_to_string(&mut e, &mut s)?;
@@ -473,7 +486,10 @@ fn scan_mod_ids(jar: &Path) -> Result<Vec<String>> {
     }
     let nested: Vec<String> = (0..zip.len())
         .filter_map(|i| zip.by_index(i).ok().map(|e| e.name().to_string()))
-        .filter(|n| n.starts_with("META-INF/jarjar/") && n.ends_with(".jar"))
+        .filter(|n| {
+            (n.starts_with("META-INF/jarjar/") || n.starts_with("META-INF/jars/"))
+                && n.ends_with(".jar")
+        })
         .collect();
     for name in nested {
         let mut buf = Vec::new();
@@ -481,15 +497,10 @@ fn scan_mod_ids(jar: &Path) -> Result<Vec<String>> {
             let mut e = zip.by_name(&name)?;
             std::io::Read::read_to_end(&mut e, &mut buf)?;
         }
-        if let Ok(mut inner) = zip::ZipArchive::new(std::io::Cursor::new(buf)) {
-            if let Ok(mut te) = inner.by_name("META-INF/neoforge.mods.toml") {
-                let mut s = String::new();
-                std::io::Read::read_to_string(&mut te, &mut s)?;
-                out.extend(mod_ids_from_toml(&s));
-            }
-        }
+        // Вложенный jar сам может нести JiJ -> рекурсия. Ошибку внутри не роняем.
+        let _ = scan_jar_bytes(&buf, out);
     }
-    Ok(out)
+    Ok(())
 }
 
 /// modId из секций [[mods]] содержимого neoforge.mods.toml (зависимости игнор).
