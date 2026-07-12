@@ -23,6 +23,7 @@ import {
 import { LoginScreen } from "./LoginScreen";
 import { SkinPanel } from "./SkinPanel";
 import { SettingsModal } from "./SettingsModal";
+import { InstallPathModal } from "./InstallPathModal";
 import { checkUpdate, installUpdate, type Update } from "./lib/updater";
 import { getVersion } from "@tauri-apps/api/app";
 import { error as logError, info as logInfo } from "@tauri-apps/plugin-log";
@@ -70,9 +71,10 @@ function App() {
   // Статус игрового сервера (null = ещё не проверяли).
   const [server, setServer] = useState<ServerStatus | null>(null);
 
-  // Меню доп-функций (бургер) + окно настроек.
+  // Меню доп-функций (бургер) + окно настроек + выбор места установки.
   const [menuOpen, setMenuOpen] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
+  const [showInstallModal, setShowInstallModal] = useState(false);
 
   // Тосты-уведомления.
   const [toasts, setToasts] = useState<Toast[]>([]);
@@ -255,14 +257,22 @@ function App() {
     }
   }
 
-  // Установка (если игра ещё не установлена) — без запуска.
-  async function onInstall() {
+  // Клик «Установить» — сперва спрашиваем место установки (модалка).
+  function onInstall() {
+    setShowInstallModal(true);
+  }
+
+  // Подтверждён выбор места → запоминаем путь и ставим игру (без запуска).
+  async function runInstall(dir: string) {
+    setShowInstallModal(false);
+    await applyPath(dir);
+    persistInstallDir(dir).catch(() => {});
     setPhase("syncing");
     setErrorMsg("");
     setProgress(null);
-    logInfo(`UI: нажата «Установить» (путь=${installDir})`);
+    logInfo(`UI: установка (путь=${dir})`);
     try {
-      await installGame(installDir);
+      await installGame(dir);
       setInstalled(true);
       setPhase("idle");
       logInfo("UI: установка завершена");
@@ -491,6 +501,15 @@ function App() {
           installDir={installDir}
           onChangePath={onChangePath}
           busy={phase === "syncing"}
+        />
+      )}
+
+      {/* Выбор места установки (первая установка) */}
+      {showInstallModal && (
+        <InstallPathModal
+          onClose={() => setShowInstallModal(false)}
+          onConfirm={runInstall}
+          onToast={pushToast}
         />
       )}
 
