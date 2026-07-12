@@ -36,3 +36,6 @@ build-work
 *.key
 *.key.pub
 .tauri/
+
+# Приватный state-doc для сессий Claude (операционные детали инфры) — не коммитить
+PROJECT_STATE.md
