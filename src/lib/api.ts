@@ -213,6 +213,11 @@ export function installGame(installDir: string): Promise<void> {
   return invoke<void>("install_game", { installDir });
 }
 
+/** Принудительная полная проверка/восстановление файлов (хеш-скан + докачка). */
+export function verifyFiles(installDir: string): Promise<void> {
+  return invoke<void>("verify_files", { installDir });
+}
+
 /** Полный цикл «Играть»: ваниль + JRE + файлы + запуск. Возвращает PID. */
 export function play(installDir: string, playerName: string): Promise<number> {
   return invoke<number>("play", { installDir, playerName });

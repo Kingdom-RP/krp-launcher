@@ -14,7 +14,7 @@ use tauri::{AppHandle, Emitter, Manager};
 
 use crate::error::{LauncherError, Result};
 use crate::progress::Progress;
-use crate::{auth, config, download, java, launch, manifest, settings, vanilla};
+use crate::{auth, config, download, java, launch, manifest, settings, state, vanilla};
 
 /// Итог синхронизации файлов манифеста.
 #[derive(Debug, Clone, Serialize)]
@@ -339,13 +339,80 @@ fn ensure_default_options(install_dir: &Path) {
     }
 }
 
+/// Скачать манифест с несколькими попытками (GitHub Pages бывает недоступен /
+/// отдаёт 404 транзиентно). `None`, если все попытки провалились.
+async fn fetch_manifest_retry(client: &reqwest::Client) -> Option<manifest::Manifest> {
+    const ATTEMPTS: u32 = 3;
+    for i in 0..ATTEMPTS {
+        match manifest::fetch_manifest(client, &config::manifest_url()).await {
+            Ok(m) => return Some(m),
+            Err(e) => {
+                log::warn!("fetch_manifest: попытка {}/{ATTEMPTS} не удалась: {e}", i + 1);
+                if i + 1 < ATTEMPTS {
+                    tokio::time::sleep(std::time::Duration::from_millis(600 * (i as u64 + 1))).await;
+                }
+            }
+        }
+    }
+    None
+}
+
+/// Слепок актуален: версия совпадает и все клиентские файлы на месте с тем же
+/// `size`+`mtime` (проверка только `stat`, без чтения/хеширования). Так удаление/
+/// правка мода ловятся, а неизменённая установка запускается без ресинка.
+fn state_up_to_date(install_dir: &Path, manifest: &manifest::Manifest) -> bool {
+    let Some(st) = state::load(install_dir) else {
+        return false;
+    };
+    if st.version != manifest.version {
+        return false;
+    }
+    for f in manifest.client_files() {
+        let Ok(dest) = crate::paths::safe_join(install_dir, &f.path) else {
+            return false;
+        };
+        match (state::mark(&dest), st.files.get(&f.path)) {
+            (Some(m), Some(c)) if &m == c => {}
+            _ => return false, // отсутствует или изменён
+        }
+    }
+    true
+}
+
+/// Записать слепок установки (версия + профиль/injector + size/mtime файлов).
+fn write_state(install_dir: &Path, manifest: &manifest::Manifest) {
+    let mut files = std::collections::HashMap::new();
+    for f in manifest.client_files() {
+        if let Ok(dest) = crate::paths::safe_join(install_dir, &f.path) {
+            if let Some(mk) = state::mark(&dest) {
+                files.insert(f.path.clone(), mk);
+            }
+        }
+    }
+    state::save(
+        install_dir,
+        &state::InstallState {
+            version: manifest.version.clone(),
+            neoforge_profile: manifest.neoforge_profile.clone(),
+            authlib_injector: manifest.authlib_injector.clone(),
+            files,
+        },
+    );
+}
+
 /// Установить игру без запуска: ваниль → JRE → файлы NeoForge/моды.
 pub async fn install_only(
     app: &AppHandle,
     client: &reqwest::Client,
     install_dir: PathBuf,
 ) -> Result<()> {
-    let manifest = manifest::fetch_manifest(client, &config::manifest_url()).await?;
+    let manifest = fetch_manifest_retry(client).await.ok_or_else(|| {
+        LauncherError::Other(
+            "Не удалось получить manifest.json — источник обновлений (GitHub) недоступен. \
+             Попробуйте позже."
+                .into(),
+        )
+    })?;
     log::info!(
         "install: манифест v{} (MC {}, NeoForge {}), файлов: {}",
         manifest.version,
@@ -355,43 +422,42 @@ pub async fn install_only(
     );
     let progress = Arc::new(Progress::new(app.clone()));
     sync_all(client, &install_dir, &manifest, &progress, "Устанавливаем").await?;
+    write_state(&install_dir, &manifest);
     Ok(())
 }
 
-/// Полный цикл «Играть»: установка (ваниль → JRE → файлы) → запуск.
-/// Возвращает PID процесса игры.
-pub async fn play(
+/// Принудительная полная проверка/восстановление файлов (хеш всех, докачка
+/// битых) — для кнопки «Проверить файлы» (страховка от bit-rot).
+pub async fn verify_files(
     app: &AppHandle,
     client: &reqwest::Client,
     install_dir: PathBuf,
+) -> Result<()> {
+    let manifest = fetch_manifest_retry(client).await.ok_or_else(|| {
+        LauncherError::Other("Источник обновлений недоступен. Попробуйте позже.".into())
+    })?;
+    let progress = Arc::new(Progress::new(app.clone()));
+    sync_all(client, &install_dir, &manifest, &progress, "Проверяем").await?;
+    write_state(&install_dir, &manifest);
+    Ok(())
+}
+
+/// Общая финальная часть «Играть»: авторизация (drasl) + спавн игры + скрытие/
+/// показ окна лаунчера. `injector_rel` — путь к authlib-injector (из манифеста
+/// или из слепка при офлайн-запуске); `None` → офлайн-режим авторизации.
+async fn launch_flow(
+    app: &AppHandle,
+    client: &reqwest::Client,
+    install_dir: PathBuf,
+    profile: String,
+    injector_rel: Option<String>,
+    java_exe: PathBuf,
     player_name: String,
 ) -> Result<u32> {
-    let manifest = manifest::fetch_manifest(client, &config::manifest_url()).await?;
-    log::info!(
-        "play: манифест v{} (MC {}, NeoForge {}), файлов: {}",
-        manifest.version,
-        manifest.minecraft,
-        manifest.neoforge,
-        manifest.files.len()
-    );
-
-    let progress = Arc::new(Progress::new(app.clone()));
-    // Игра уже установлена (кнопка «Играть») — это сверка/докачка, не установка.
-    let java_exe = sync_all(client, &install_dir, &manifest, &progress, "Проверяем").await?;
-
-    // Запуск игры.
-    log::info!("play: запуск игры");
-    let profile = manifest
-        .neoforge_profile
-        .clone()
-        .ok_or_else(|| LauncherError::Other("в манифесте нет neoforge_profile".into()))?;
-
-    // Авторизация: если игрок вошёл (drasl) и в манифесте есть authlib-injector —
-    // запускаем онлайн (реальные токены + javaagent); иначе офлайн.
     let base = settings::auth_base_url(app);
     let online_data: Option<(String, String, String, PathBuf, String)> =
         match settings::load(app).account {
-            Some(mut account) => match manifest.authlib_injector.as_deref() {
+            Some(mut account) => match injector_rel.as_deref() {
                 Some(rel) => {
                     auth::ensure_session(client, &base, &mut account).await?;
                     let _ = settings::set_account(app, Some(account.clone()));
@@ -407,7 +473,7 @@ pub async fn play(
                     ))
                 }
                 None => {
-                    log::warn!("play: в манифесте нет authlib_injector — запуск офлайн");
+                    log::warn!("play: нет authlib_injector — запуск офлайн");
                     None
                 }
             },
@@ -416,8 +482,6 @@ pub async fn play(
 
     let jvm_prefix = settings::jvm_args(app);
 
-    // launch блокирует поток (спавн + короткое ожидание раннего краха) —
-    // уносим в blocking-пул, чтобы не вешать async-исполнитель.
     let child = tokio::task::spawn_blocking(move || {
         let online = online_data.as_ref().map(|(u, uuid, token, inj, api)| {
             launch::OnlineAuth {
@@ -442,8 +506,6 @@ pub async fn play(
     .map_err(|e| LauncherError::Other(format!("задача запуска прервана: {e}")))??;
     let pid = child.id();
 
-    // Прячем окно лаунчера на время игры и показываем обратно, когда игра
-    // закроется (плюс шлём событие, чтобы фронтенд сбросил состояние).
     if let Some(win) = app.get_webview_window("main") {
         let _ = win.hide();
     }
@@ -460,4 +522,85 @@ pub async fn play(
         }
     });
     Ok(pid)
+}
+
+/// Полный цикл «Играть». Логика проверки:
+/// - манифест доступен + версия/файлы совпали со слепком → **быстрый запуск**
+///   без ресинка (только stat, анти-чит prune, servers.dat);
+/// - манифест доступен, но версия/файлы отличаются → полный sync + слепок;
+/// - манифест НЕдоступен (GitHub лёг), но игра установлена → **офлайн-запуск**
+///   на текущих файлах (профиль/injector из слепка) — не блокируем игрока.
+pub async fn play(
+    app: &AppHandle,
+    client: &reqwest::Client,
+    install_dir: PathBuf,
+    player_name: String,
+) -> Result<u32> {
+    match fetch_manifest_retry(client).await {
+        Some(manifest) => {
+            log::info!(
+                "play: манифест v{} (MC {}, NeoForge {}), файлов: {}",
+                manifest.version,
+                manifest.minecraft,
+                manifest.neoforge,
+                manifest.files.len()
+            );
+
+            let java_exe = if is_installed(&install_dir) && state_up_to_date(&install_dir, &manifest)
+            {
+                log::info!(
+                    "play: версия {} без изменений — быстрый запуск (без ресинка)",
+                    manifest.version
+                );
+                // Манифест есть — держим анти-чит и мелочи актуальными (дёшево).
+                let _ = prune_mods(&install_dir, &manifest);
+                ensure_default_options(&install_dir);
+                ensure_server_entry(&install_dir);
+                java::java_exe_path(&install_dir, "runtime")
+            } else {
+                let progress = Arc::new(Progress::new(app.clone()));
+                let je = sync_all(client, &install_dir, &manifest, &progress, "Проверяем").await?;
+                write_state(&install_dir, &manifest);
+                je
+            };
+
+            let profile = manifest
+                .neoforge_profile
+                .clone()
+                .ok_or_else(|| LauncherError::Other("в манифесте нет neoforge_profile".into()))?;
+            launch_flow(
+                app,
+                client,
+                install_dir,
+                profile,
+                manifest.authlib_injector.clone(),
+                java_exe,
+                player_name,
+            )
+            .await
+        }
+        None => {
+            // GitHub недоступен — не блокируем, если игра стоит (fail-open).
+            if !is_installed(&install_dir) {
+                return Err(LauncherError::Other(
+                    "Источник обновлений недоступен, а игра ещё не установлена. Попробуйте позже.".into(),
+                ));
+            }
+            let st = state::load(&install_dir).ok_or_else(|| {
+                LauncherError::Other(
+                    "Источник недоступен и нет локального слепка игры — запустите с интернетом хотя бы раз.".into(),
+                )
+            })?;
+            let profile = st
+                .neoforge_profile
+                .clone()
+                .ok_or_else(|| LauncherError::Other("нет neoforge_profile в слепке".into()))?;
+            log::warn!(
+                "play: источник недоступен — офлайн-запуск на текущих файлах (v{})",
+                st.version
+            );
+            let java_exe = java::java_exe_path(&install_dir, "runtime");
+            launch_flow(app, client, install_dir, profile, st.authlib_injector.clone(), java_exe, player_name).await
+        }
+    }
 }

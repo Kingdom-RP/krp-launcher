@@ -10,6 +10,7 @@ mod paths;
 mod progress;
 mod server;
 mod settings;
+mod state;
 mod skin;
 mod vanilla;
 
@@ -382,6 +383,19 @@ async fn sync_files(
         .inspect_err(|e| log::error!("sync_files: ошибка: {e}"))
 }
 
+/// Принудительно проверить/восстановить файлы игры (полный хеш-скан + докачка
+/// битых). Для кнопки «Проверить файлы» — страховка от повреждений.
+#[tauri::command]
+async fn verify_files(
+    app: tauri::AppHandle,
+    client: tauri::State<'_, reqwest::Client>,
+    install_dir: String,
+) -> Result<()> {
+    install::verify_files(&app, client.inner(), PathBuf::from(install_dir))
+        .await
+        .inspect_err(|e| log::error!("verify_files: ошибка: {e}"))
+}
+
 /// Установить игру без запуска: ваниль (Mojang) → JRE → файлы манифеста.
 /// Прогресс — событием `sync://progress`. Запоминает путь установки.
 #[tauri::command]
@@ -493,6 +507,7 @@ pub fn run() {
             ensure_java,
             ensure_vanilla,
             sync_files,
+            verify_files,
             install_game,
             play,
         ])

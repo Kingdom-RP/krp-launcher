@@ -15,6 +15,7 @@ import {
   setInstallDir as persistInstallDir,
   uninstallGame,
   validateInstallPath,
+  verifyFiles,
   type AccountInfo,
   type PathValidation,
   type ServerStatus,
@@ -262,6 +263,23 @@ function App() {
     setShowInstallModal(true);
   }
 
+  // Принудительная проверка/восстановление файлов (из меню).
+  async function onVerify() {
+    setPhase("syncing");
+    setErrorMsg("");
+    setProgress(null);
+    logInfo(`UI: проверка файлов (путь=${installDir})`);
+    try {
+      await verifyFiles(installDir);
+      setPhase("idle");
+      pushToast("ok", "Файлы проверены");
+    } catch (e) {
+      setErrorMsg(String(e));
+      setPhase("error");
+      logError(`UI: ошибка проверки файлов: ${e}`);
+    }
+  }
+
   // Подтверждён выбор места → запоминаем путь и ставим игру (без запуска).
   async function runInstall(dir: string) {
     setShowInstallModal(false);
@@ -468,6 +486,18 @@ function App() {
                 >
                   🔄 Проверить обновление
                 </button>
+                {installed && (
+                  <button
+                    className="fn-item"
+                    disabled={phase === "syncing"}
+                    onClick={() => {
+                      setMenuOpen(false);
+                      onVerify();
+                    }}
+                  >
+                    🛠️ Проверить файлы игры
+                  </button>
+                )}
                 {installed && (
                   <button
                     className="fn-item danger"
