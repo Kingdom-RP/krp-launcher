@@ -209,7 +209,7 @@ pub async fn ensure_vanilla(
         download::ensure_file_sha1(client, &mv.url, &version_json_dest, &mv.sha1, |_, _| {})
             .await?;
     } else {
-        download::download_to_file(client, &mv.url, &version_json_dest, |_, _| {}).await?;
+        download::download_to_file(client, &mv.url, None, &version_json_dest, |_, _| {}).await?;
     }
 
     // Индекс ассетов нужен заранее, чтобы знать размеры объектов.

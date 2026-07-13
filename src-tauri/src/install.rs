@@ -155,8 +155,15 @@ pub async fn sync_manifest(
         let dest = crate::paths::safe_join(install_dir, &entry.path)?;
         progress.set_label(friendly_label(entry.kind, verb));
 
-        let did = download::ensure_file(client, &entry.url, &dest, &entry.sha256, progress.file_cb())
-            .await?;
+        let did = download::ensure_file(
+            client,
+            &entry.url,
+            Some(&entry.path),
+            &dest,
+            &entry.sha256,
+            progress.file_cb(),
+        )
+        .await?;
 
         if did {
             downloaded += 1;

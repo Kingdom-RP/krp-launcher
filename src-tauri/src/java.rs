@@ -122,7 +122,8 @@ pub async fn ensure_java(
         if is_tgz { "tar.gz" } else { "zip" }
     ));
 
-    download::download_to_file(client, &entry.url, &archive, progress.file_cb()).await?;
+    // mirror_key=None: JRE хостится на нашем base — ключ выведется снятием префикса.
+    download::download_to_file(client, &entry.url, None, &archive, progress.file_cb()).await?;
 
     let actual = download::sha256_file(&archive).await?;
     if !actual.eq_ignore_ascii_case(&entry.sha256) {
@@ -267,7 +268,7 @@ mod tests {
         let client = reqwest::Client::new();
         let archive = tmp.join("jre.zip");
 
-        download::download_to_file(&client, url, &archive, |d, t| {
+        download::download_to_file(&client, url, None, &archive, |d, t| {
             if let Some(t) = t {
                 eprint!("\rскачано {d}/{t}");
             }

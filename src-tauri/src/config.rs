@@ -7,6 +7,73 @@
 /// Меняется только здесь — остальной код берёт URL через [`manifest_url`].
 pub const MANIFEST_BASE_URL: &str = "https://kingdom-rp.github.io/krp-mod";
 
+/// Зеркала [`MANIFEST_BASE_URL`] в порядке приоритета (fallback, если основной
+/// источник недоступен — например, GitHub блокируется с российских IP). Каждое
+/// зеркало — база с той же структурой каталогов, что и основной источник
+/// (заливается тем же `dist/` сборщика). Пустой список = зеркал нет.
+///
+/// Yandex Object Storage (path-style): `https://storage.yandexcloud.net/<bucket>`.
+pub const MIRRORS: &[&str] = &["https://storage.yandexcloud.net/kingdomrp"];
+
+/// «Липкое» предпочтение зеркала на время сессии: как только зеркало впервые
+/// помогло (основной источник не ответил), дальше пробуем зеркало ПЕРВЫМ — чтобы
+/// заблокированный игрок не ждал connect-timeout основного источника на каждом
+/// файле модпака.
+static PREFER_MIRROR: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Запомнить, что зеркало сработало (основной источник, вероятно, недоступен).
+pub fn set_prefer_mirror() {
+    PREFER_MIRROR.store(true, std::sync::atomic::Ordering::Relaxed);
+}
+
+fn prefer_mirror() -> bool {
+    PREFER_MIRROR.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+/// Список URL-кандидатов для загрузки: основной источник (primary) + зеркала.
+///
+/// Зеркало строится как `{MIRROR}/{ключ}`, где ключ — путь файла в раскладке
+/// `dist/` (совпадает с `FileEntry.path`). S3-бакет повторяет структуру `dist/`,
+/// поэтому один ключ работает и для наших файлов, и для сторонних модов (их
+/// сборщик тоже кладёт в `dist/mods/`).
+///
+/// Ключ зеркала определяется так:
+/// - `mirror_key = Some(path)` — явный путь (сторонние моды: primary-url = внешний
+///   CDN, а mirror-ключ = `mods/<jar>`);
+/// - `mirror_key = None` — вывести из `url`, сняв префикс [`MANIFEST_BASE_URL`]
+///   (наши файлы/JRE/манифест). Если url не с нашего base (ваниль с Mojang) —
+///   зеркал нет, возвращается только исходный url.
+///
+/// Порядок: если в этой сессии зеркало уже выручало ([`prefer_mirror`]) — зеркала
+/// идут первыми (основной источник, вероятно, заблокирован), иначе — основной.
+pub fn url_candidates(url: &str, mirror_key: Option<&str>) -> Vec<String> {
+    let key: Option<String> = match mirror_key {
+        Some(k) => Some(k.trim_start_matches('/').to_string()),
+        None => url
+            .strip_prefix(MANIFEST_BASE_URL)
+            .map(|r| r.trim_start_matches('/').to_string()),
+    };
+    let Some(key) = key else {
+        return vec![url.to_string()];
+    };
+    if MIRRORS.is_empty() {
+        return vec![url.to_string()];
+    }
+    let mirrored: Vec<String> = MIRRORS
+        .iter()
+        .map(|m| format!("{}/{}", m.trim_end_matches('/'), key))
+        .collect();
+    if prefer_mirror() {
+        let mut out = mirrored;
+        out.push(url.to_string());
+        out
+    } else {
+        let mut out = vec![url.to_string()];
+        out.extend(mirrored);
+        out
+    }
+}
+
 /// Полный URL манифеста.
 pub fn manifest_url() -> String {
     format!("{MANIFEST_BASE_URL}/manifest.json")

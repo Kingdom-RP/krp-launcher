@@ -39,6 +39,7 @@ pub async fn sha1_file(path: &Path) -> Result<String> {
 pub async fn download_to_file<F>(
     client: &reqwest::Client,
     url: &str,
+    mirror_key: Option<&str>,
     dest: &Path,
     on_progress: F,
 ) -> Result<()>
@@ -51,16 +52,32 @@ where
 
     let part = part_path(dest);
 
-    let result = stream_to_file(client, url, &part, on_progress).await;
-    if result.is_err() {
-        // Чистим недокачанный временный файл, чтобы не копился мусор.
-        let _ = tokio::fs::remove_file(&part).await;
-        return result;
+    // Пробуем основной источник, затем зеркала (config::url_candidates). Для
+    // ванили (Mojang, mirror_key=None и url не с нашего base) кандидат один.
+    let candidates = crate::config::url_candidates(url, mirror_key);
+    let mut last_err: Option<LauncherError> = None;
+    for cand in &candidates {
+        match stream_to_file(client, cand, &part, &on_progress).await {
+            Ok(()) => {
+                if cand != url {
+                    // Сработало зеркало — основной источник, вероятно, недоступен.
+                    // Дальше в этой сессии пробуем зеркало первым.
+                    crate::config::set_prefer_mirror();
+                    log::warn!("download: основной источник недоступен, скачано с зеркала {cand}");
+                }
+                // Атомарная замена (на Windows перезапишет существующий dest).
+                tokio::fs::rename(&part, dest).await?;
+                return Ok(());
+            }
+            Err(e) => {
+                // Чистим недокачанный временный файл перед следующей попыткой.
+                let _ = tokio::fs::remove_file(&part).await;
+                last_err = Some(e);
+            }
+        }
     }
 
-    // Атомарная замена (на Windows перезапишет существующий dest).
-    tokio::fs::rename(&part, dest).await?;
-    Ok(())
+    Err(last_err.unwrap_or_else(|| LauncherError::Other(format!("не удалось скачать {url}"))))
 }
 
 /// Путь временного файла загрузки (`<dest>.part`).
@@ -75,7 +92,7 @@ async fn stream_to_file<F>(
     client: &reqwest::Client,
     url: &str,
     dest: &Path,
-    on_progress: F,
+    on_progress: &F,
 ) -> Result<()>
 where
     F: Fn(u64, Option<u64>),
@@ -106,6 +123,7 @@ where
 pub async fn ensure_file<F>(
     client: &reqwest::Client,
     url: &str,
+    mirror_key: Option<&str>,
     dest: &Path,
     expected_sha256: &str,
     on_progress: F,
@@ -121,7 +139,7 @@ where
         }
     }
 
-    download_to_file(client, url, dest, on_progress).await?;
+    download_to_file(client, url, mirror_key, dest, on_progress).await?;
 
     let actual = sha256_file(dest).await?;
     if !actual.eq_ignore_ascii_case(expected_sha256) {
@@ -154,7 +172,7 @@ where
         }
     }
 
-    download_to_file(client, url, dest, on_progress).await?;
+    download_to_file(client, url, None, dest, on_progress).await?;
 
     let actual = sha1_file(dest).await?;
     if !actual.eq_ignore_ascii_case(expected_sha1) {

@@ -331,9 +331,25 @@ fn main() -> Result<()> {
             side: side.to_string(),
         });
     }
-    // Сторонние моды (modlist.toml и/или Release GitHub) — хостятся ВНЕ dist.
-    // url в манифесте указывает на их источник напрямую, не на base_url.
-    files.extend(collect_mods(&cfg)?);
+    // Сторонние моды (modlist.toml и/или Release GitHub). url в манифесте
+    // указывает на их источник напрямую (primary — CDN мода). Для ЗЕРКАЛА
+    // копируем каждый jar в dist/mods, чтобы `aws s3 sync dist/` залил его на S3:
+    // лаунчер при недоступности CDN качает по mirror-ключу = path ("mods/<jar>").
+    let external = collect_mods(&cfg)?;
+    let modcache = cfg.work.join("modcache");
+    for e in &external {
+        let name = e.path.strip_prefix("mods/").unwrap_or(&e.path);
+        let src = modcache.join(name);
+        let dst = dist.join(&e.path);
+        if let Some(p) = dst.parent() {
+            fs::create_dir_all(p)?;
+        }
+        fs::copy(&src, &dst).with_context(|| {
+            format!("копирование стороннего мода {} в dist для зеркала", e.path)
+        })?;
+    }
+    println!("сторонних модов скопировано в dist для зеркала: {}", external.len());
+    files.extend(external);
 
     files.sort_by(|a, b| a.path.cmp(&b.path));
     println!("всего файлов в манифесте: {}", files.len());

@@ -114,24 +114,50 @@ pub enum FileKind {
 /// (fail-closed, защита от подмены манифеста при компрометации источника/MITM).
 /// Пустой ключ → проверка пропускается (доверие TLS+GitHub Pages).
 pub async fn fetch_manifest(client: &reqwest::Client, url: &str) -> Result<Manifest> {
-    let resp = client
-        .get(url)
-        .timeout(std::time::Duration::from_secs(20))
-        .send()
-        .await
-        .map_err(|e| {
-            crate::error::LauncherError::Other(format!(
-                "Не удалось получить manifest.json ({url}). Возможно, источник \
-                 (GitHub) недоступен с вашего интернета. Подробности: {e}"
-            ))
-        })?
-        .error_for_status()?;
-    let body = resp.text().await?;
+    let body = get_text_mirrored(client, url).await.map_err(|e| {
+        crate::error::LauncherError::Other(format!(
+            "Не удалось получить manifest.json ({url}) ни с основного источника, ни \
+             с зеркал. Возможно, интернет недоступен. Подробности: {e}"
+        ))
+    })?;
 
     verify_signature(client, body.as_bytes()).await?;
 
     let manifest: Manifest = serde_json::from_str(&body)?;
     Ok(manifest)
+}
+
+/// GET текстового ресурса с основного источника, при неудаче — с зеркал
+/// ([`crate::config::url_candidates`]). Успех с зеркала фиксирует «липкое»
+/// предпочтение зеркала на сессию.
+async fn get_text_mirrored(client: &reqwest::Client, url: &str) -> Result<String> {
+    let candidates = crate::config::url_candidates(url, None);
+    let mut last_err: Option<crate::error::LauncherError> = None;
+    for cand in &candidates {
+        let attempt = async {
+            let resp = client
+                .get(cand)
+                .timeout(std::time::Duration::from_secs(20))
+                .send()
+                .await?
+                .error_for_status()?;
+            Ok::<String, crate::error::LauncherError>(resp.text().await?)
+        }
+        .await;
+        match attempt {
+            Ok(body) => {
+                if cand != url {
+                    crate::config::set_prefer_mirror();
+                    log::warn!("manifest: основной источник недоступен, получено с зеркала {cand}");
+                }
+                return Ok(body);
+            }
+            Err(e) => last_err = Some(e),
+        }
+    }
+    Err(last_err.unwrap_or_else(|| {
+        crate::error::LauncherError::Other(format!("не удалось получить {url}"))
+    }))
 }
 
 /// Проверить minisign-подпись тела манифеста. Без ключа — no-op.
@@ -145,18 +171,9 @@ async fn verify_signature(client: &reqwest::Client, body: &[u8]) -> Result<()> {
     }
 
     let sig_url = crate::config::manifest_sig_url();
-    let sig_text = client
-        .get(&sig_url)
-        .timeout(std::time::Duration::from_secs(20))
-        .send()
-        .await
-        .map_err(|e| {
-            LauncherError::Other(format!("не удалось получить подпись манифеста ({sig_url}): {e}"))
-        })?
-        .error_for_status()
-        .map_err(|e| LauncherError::Other(format!("подпись манифеста недоступна: {e}")))?
-        .text()
-        .await?;
+    let sig_text = get_text_mirrored(client, &sig_url).await.map_err(|e| {
+        LauncherError::Other(format!("не удалось получить подпись манифеста ({sig_url}): {e}"))
+    })?;
 
     let public_key = minisign_verify::PublicKey::from_base64(pubkey)
         .map_err(|e| LauncherError::Other(format!("некорректный MANIFEST_PUBKEY: {e}")))?;
