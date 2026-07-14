@@ -841,7 +841,7 @@ fn parse_args() -> Result<Config> {
     let mut mc = "1.21.1".to_string();
     let mut neoforge = "21.1.233".to_string();
     let mut base_url = "https://example.com/kingdomrp".to_string();
-    let mut mod_jar = PathBuf::from("../../krp-mod/build/libs/kingdomrpcore-0.1.0.jar");
+    let mut mod_jar = PathBuf::from("../../krp-mod/build/libs/kingdomrpcore.jar");
     let mut modlist: Option<PathBuf> = None;
     let mut shaderpacks: Vec<PathBuf> = Vec::new();
     let mut sides: Option<PathBuf> = None;
