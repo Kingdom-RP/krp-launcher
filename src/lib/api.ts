@@ -103,6 +103,11 @@ export function uploadSkin(path: string, slim: boolean): Promise<void> {
   return invoke<void>("upload_skin", { path, slim });
 }
 
+/** Сменить только тип модели (slim/classic) у уже загруженного скина. */
+export function setSkinModel(slim: boolean): Promise<void> {
+  return invoke<void>("set_skin_model", { slim });
+}
+
 /** Диалог выбора PNG-скина. `null`, если игрок отменил. */
 export async function pickSkinFile(): Promise<string | null> {
   const sel = await openDialog({

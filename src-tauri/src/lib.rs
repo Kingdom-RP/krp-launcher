@@ -144,6 +144,22 @@ async fn upload_skin(
         .inspect_err(|e| log::error!("upload_skin: {e}"))
 }
 
+/// Сменить только тип модели (slim/classic) у уже загруженного скина.
+#[tauri::command]
+async fn set_skin_model(
+    app: tauri::AppHandle,
+    client: tauri::State<'_, reqwest::Client>,
+    slim: bool,
+) -> Result<()> {
+    let account = settings::load(&app)
+        .account
+        .ok_or_else(|| error::LauncherError::Other("сначала войдите в аккаунт".into()))?;
+    let base = settings::auth_base_url(&app);
+    auth::set_skin_model(client.inner(), &base, &account, slim)
+        .await
+        .inspect_err(|e| log::error!("set_skin_model: {e}"))
+}
+
 /// Проверить, что выбранный PNG — корректная развёртка скина Minecraft
 /// (64×64 или 64×32). Возвращает формат (`modern`/`legacy`) или ошибку с
 /// понятным игроку текстом. Используется перед загрузкой скина на auth-сервер.
@@ -496,6 +512,7 @@ pub fn run() {
             auth_login,
             auth_logout,
             upload_skin,
+            set_skin_model,
             server_status,
             get_launch_settings,
             set_launch_settings,

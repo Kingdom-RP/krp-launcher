@@ -549,6 +549,97 @@ button:disabled {
   cursor: pointer;
 }
 
+/* «?»-подсказка рядом с надписью «Скин» */
+.skin-controls .label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.help-tip {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 15px;
+  height: 15px;
+  border-radius: 50%;
+  border: 1px solid rgba(255, 255, 255, 0.35);
+  color: var(--text-dim);
+  font-size: 0.65rem;
+  font-weight: 700;
+  line-height: 1;
+  cursor: help;
+  letter-spacing: 0;
+  text-transform: none;
+  outline: none;
+}
+
+.help-tip:hover,
+.help-tip:focus-visible {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+/* Всплывающая инструкция (data-tip). \n в тексте → переносы строк. */
+.help-tip::after {
+  content: attr(data-tip);
+  position: absolute;
+  left: 50%;
+  bottom: calc(100% + 8px);
+  transform: translateX(-50%);
+  white-space: pre-line;
+  width: max-content;
+  max-width: 260px;
+  padding: 0.55rem 0.7rem;
+  border-radius: 8px;
+  background: #14110a;
+  border: 1px solid rgba(200, 162, 74, 0.35);
+  color: var(--text);
+  font-size: 0.78rem;
+  font-weight: 400;
+  line-height: 1.35;
+  text-align: left;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.5);
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 0.15s;
+  z-index: 1100;
+  pointer-events: none;
+}
+
+.help-tip:hover::after,
+.help-tip:focus-visible::after {
+  opacity: 1;
+  visibility: visible;
+}
+
+/* Кнопка «Применить» с несохранёнными изменениями — акцент + пульс */
+.button.dirty,
+button.primary.dirty {
+  border: 1px solid var(--accent);
+  background: rgba(200, 162, 74, 0.18);
+  color: var(--text);
+  border-radius: 6px;
+  padding: 0.45rem 0.9rem;
+  font-size: 0.85rem;
+  animation: dirty-pulse 1.6s ease-in-out infinite;
+}
+
+button.primary.dirty:not(:disabled):hover {
+  background: rgba(200, 162, 74, 0.28);
+}
+
+@keyframes dirty-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(200, 162, 74, 0.0); }
+  50% { box-shadow: 0 0 0 3px rgba(200, 162, 74, 0.25); }
+}
+
+.save-hint {
+  font-size: 0.75rem;
+  color: var(--accent);
+}
+
 /* Тосты-уведомления (правый нижний угол) */
 .toast-stack {
   position: fixed;

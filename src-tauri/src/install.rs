@@ -118,7 +118,7 @@ pub async fn ensure_vanilla(
     install_dir: PathBuf,
 ) -> Result<()> {
     let progress = Progress::new(app.clone());
-    vanilla::ensure_vanilla(client, &install_dir, config::MINECRAFT_VERSION, &progress, "Устанавливаем")
+    vanilla::ensure_vanilla(client, &install_dir, config::MINECRAFT_VERSION, &progress, "Устанавливаем", false)
         .await
 }
 
@@ -131,7 +131,8 @@ pub async fn sync_files(
     let manifest = manifest::fetch_manifest(client, &config::manifest_url()).await?;
     let progress = Progress::new(app.clone());
     progress.add_total(manifest.client_files().map(|f| f.size).sum());
-    sync_manifest(client, &install_dir, &manifest, &progress, "Проверяем").await
+    // Явная команда докачки файлов — полная проверка (SHA-256).
+    sync_manifest(client, &install_dir, &manifest, &progress, "Проверяем", true).await
 }
 
 /// Докачать файлы уже полученного манифеста, отчитываясь в общий трекер.
@@ -143,6 +144,11 @@ pub async fn sync_manifest(
     manifest: &manifest::Manifest,
     progress: &Progress,
     verb: &str,
+    // force=false — быстрый путь: файл со совпавшим size+mtime (по слепку
+    // state.rs) считается валидным и НЕ хешируется (докачиваем только
+    // отсутствующие/изменённые). force=true («Проверить файлы») — полный
+    // SHA-256 каждого (страховка от bit-rot).
+    force: bool,
 ) -> Result<SyncSummary> {
     // Клиентский потребитель: качаем только client+both (server-only пропускаем).
     let client_files: Vec<&manifest::FileEntry> = manifest.client_files().collect();
@@ -150,10 +156,25 @@ pub async fn sync_manifest(
     let mut downloaded = 0usize;
     let mut skipped = 0usize;
 
+    // Слепок для stat-скипа (только на быстром пути).
+    let prev = if force { None } else { state::load(install_dir) };
+
     for entry in &client_files {
         // Путь из манифеста — через safe_join (защита от path traversal).
         let dest = crate::paths::safe_join(install_dir, &entry.path)?;
         progress.set_label(friendly_label(entry.kind, verb));
+
+        // Быстрый путь: size+mtime совпали со слепком → файл на месте и не
+        // менялся, хеш не читаем. Изменённый/удалённый → проваливаемся в ensure_file.
+        if let Some(st) = &prev {
+            if let Some(expected) = st.files.get(&entry.path) {
+                if state::mark(&dest).as_ref() == Some(expected) {
+                    progress.add_skipped(entry.size);
+                    skipped += 1;
+                    continue;
+                }
+            }
+        }
 
         let did = download::ensure_file(
             client,
@@ -233,6 +254,10 @@ async fn sync_all(
     manifest: &manifest::Manifest,
     progress: &Progress,
     verb: &str,
+    // force=true — полная проверка (кнопка «Проверить файлы»): SHA-1-скан ванили
+    // + SHA-256 всех файлов манифеста. false = быстрый путь: ваниль по маркеру,
+    // файлы манифеста по stat (size+mtime) без хеширования.
+    force: bool,
 ) -> Result<PathBuf> {
     // Объём файлов манифеста (NeoForge + моды) знаем заранее — только клиентские.
     progress.add_total(manifest.client_files().map(|f| f.size).sum());
@@ -248,7 +273,7 @@ async fn sync_all(
     // 1. Ваниль с Mojang (client.jar + библиотеки + ассеты). Сама добавит свой
     //    объём в общий трекер.
     log::info!("install: [1/3] ваниль с Mojang ({})", config::MINECRAFT_VERSION);
-    vanilla::ensure_vanilla(client, install_dir, config::MINECRAFT_VERSION, progress, verb).await?;
+    vanilla::ensure_vanilla(client, install_dir, config::MINECRAFT_VERSION, progress, verb, force).await?;
 
     // 2. JRE из манифеста.
     log::info!("install: [2/3] JRE ({})", java::platform_key());
@@ -256,7 +281,7 @@ async fn sync_all(
 
     // 3. Файлы NeoForge + моды.
     log::info!("install: [3/3] синхронизация файлов NeoForge + моды");
-    sync_manifest(client, install_dir, manifest, progress, verb).await?;
+    sync_manifest(client, install_dir, manifest, progress, verb, force).await?;
 
     // Анти-чит: убираем из mods всё, чего нет в манифесте.
     let pruned = prune_mods(install_dir, manifest)?;
@@ -428,7 +453,7 @@ pub async fn install_only(
         manifest.files.len()
     );
     let progress = Arc::new(Progress::new(app.clone()));
-    sync_all(client, &install_dir, &manifest, &progress, "Устанавливаем").await?;
+    sync_all(client, &install_dir, &manifest, &progress, "Устанавливаем", false).await?;
     write_state(&install_dir, &manifest);
     Ok(())
 }
@@ -444,7 +469,8 @@ pub async fn verify_files(
         LauncherError::Other("Источник обновлений недоступен. Попробуйте позже.".into())
     })?;
     let progress = Arc::new(Progress::new(app.clone()));
-    sync_all(client, &install_dir, &manifest, &progress, "Проверяем").await?;
+    // Кнопка «Проверить файлы» — принудительный полный SHA-скан ванили (bit-rot).
+    sync_all(client, &install_dir, &manifest, &progress, "Проверяем", true).await?;
     write_state(&install_dir, &manifest);
     Ok(())
 }
@@ -566,7 +592,7 @@ pub async fn play(
                 java::java_exe_path(&install_dir, "runtime")
             } else {
                 let progress = Arc::new(Progress::new(app.clone()));
-                let je = sync_all(client, &install_dir, &manifest, &progress, "Проверяем").await?;
+                let je = sync_all(client, &install_dir, &manifest, &progress, "Проверяем", false).await?;
                 write_state(&install_dir, &manifest);
                 je
             };

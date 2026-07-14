@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { SkinViewer } from "skinview3d";
 import {
   pickSkinFile,
+  setSkinModel,
   skinPreviewFile,
   skinPreviewUrl,
   uploadSkin,
@@ -26,8 +27,18 @@ export function SkinPanel({
 
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [pendingPath, setPendingPath] = useState<string | null>(null);
-  const [slim, setSlim] = useState(false);
+  // Тип модели: `slim` — текущий выбор (может быть несохранён), `savedSlim` —
+  // последнее ПРИМЕНЁННОЕ значение (помним между запусками через localStorage,
+  // иначе галочка сбрасывалась в classic при перезаходе). Их расхождение = грязь.
+  const [savedSlim, setSavedSlim] = useState(
+    () => localStorage.getItem("krp.skin.slim") === "1",
+  );
+  const [slim, setSlim] = useState(savedSlim);
   const [busy, setBusy] = useState(false);
+
+  // Есть несохранённые изменения: выбран новый файл ИЛИ модель отличается от
+  // применённой. Пока грязно — подсвечиваем «Применить» и просим сохранить.
+  const dirty = pendingPath !== null || slim !== savedSlim;
 
   // Инициализация 3D-вьюера (один раз).
   useEffect(() => {
@@ -77,14 +88,22 @@ export function SkinPanel({
   }
 
   async function onApply() {
-    if (!pendingPath) return;
+    if (!dirty) return;
     setBusy(true);
     try {
-      await uploadSkin(pendingPath, slim);
+      if (pendingPath) {
+        // Новый файл: загружаем PNG + модель.
+        await uploadSkin(pendingPath, slim);
+        setPendingPath(null);
+      } else {
+        // Файл не менялся — правим только тип модели у текущего скина.
+        await setSkinModel(slim);
+      }
+      setSavedSlim(slim);
+      localStorage.setItem("krp.skin.slim", slim ? "1" : "0");
       onToast("ok", "Скин обновлён");
-      setPendingPath(null);
     } catch (e) {
-      onToast("error", `Не удалось загрузить скин: ${e}`);
+      onToast("error", `Не удалось сохранить: ${e}`);
     } finally {
       setBusy(false);
     }
@@ -96,7 +115,24 @@ export function SkinPanel({
         <canvas ref={canvasRef} />
       </div>
       <div className="skin-controls">
-        <span className="label">Скин</span>
+        <span className="label">
+          Скин
+          <span
+            className="help-tip"
+            tabIndex={0}
+            aria-label="Как установить скин"
+            data-tip={
+              "Как установить скин:\n" +
+              "1. «Выбрать файл скина» — PNG 64×64 (или 64×32).\n" +
+              "2. При желании включите «Тонкая модель» (руки Alex, 3px).\n" +
+              "3. Нажмите «Применить скин», чтобы сохранить.\n\n" +
+              "Модель можно менять и без нового файла — просто\n" +
+              "переключите галочку и нажмите «Применить»."
+            }
+          >
+            ?
+          </span>
+        </span>
         <label className="skin-model">
           <input
             type="checkbox"
@@ -110,12 +146,15 @@ export function SkinPanel({
           Выбрать файл скина
         </button>
         <button
-          className="ghost"
-          disabled={disabled || busy || !pendingPath}
+          className={dirty ? "primary dirty" : "ghost"}
+          disabled={disabled || busy || !dirty}
           onClick={onApply}
         >
-          {busy ? "Загрузка…" : "Применить скин"}
+          {busy ? "Сохранение…" : "Применить скин"}
         </button>
+        {dirty && !busy && (
+          <span className="save-hint">Сохраните изменения</span>
+        )}
       </div>
     </section>
   );

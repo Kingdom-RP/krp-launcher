@@ -182,13 +182,30 @@ pub async fn fetch_version_json(client: &reqwest::Client, url: &str) -> Result<V
 ///
 /// Считает общий объём ванили, добавляет его в общий трекер `progress` и качает
 /// недостающее, сообщая скачанные/пропущенные байты в трекер.
+///
+/// `force=false` (быстрый путь запуска): если ваниль уже полностью установлена
+/// (есть маркер `versions/<id>/.krp_vanilla_ok`), пропускаем весь скан —
+/// ассеты Mojang контент-адресуемы и для данной версии неизменны, повторно
+/// хешировать ~300 МБ каждый запуск незачем. `force=true` (кнопка «Проверить
+/// файлы») игнорирует маркер и делает полный SHA-1-скан (страховка от bit-rot).
 pub async fn ensure_vanilla(
     client: &reqwest::Client,
     install_dir: &Path,
     version_id: &str,
     progress: &Progress,
     verb: &str,
+    force: bool,
 ) -> Result<()> {
+    // Маркер завершённой ванили — пропуск дорогого хеш-скана на быстром пути.
+    let marker = install_dir
+        .join("versions")
+        .join(version_id)
+        .join(".krp_vanilla_ok");
+    if !force && marker.exists() {
+        log::info!("vanilla: {version_id} уже установлен (маркер) — пропуск скана");
+        return Ok(());
+    }
+
     let manifest = fetch_version_manifest(client).await?;
     let mv = manifest
         .versions
@@ -298,6 +315,12 @@ pub async fn ensure_vanilla(
         if !did {
             progress.add_skipped(object.size);
         }
+    }
+
+    // Ваниль полностью на месте и проверена — ставим маркер, чтобы следующий
+    // запуск пропустил хеш-скан (снимается кнопкой «Проверить файлы» → force).
+    if let Err(e) = std::fs::write(&marker, version_id) {
+        log::warn!("vanilla: не записать маркер {}: {e}", marker.display());
     }
 
     Ok(())

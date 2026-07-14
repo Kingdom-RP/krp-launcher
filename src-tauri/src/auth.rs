@@ -256,6 +256,29 @@ pub async fn upload_skin(
     Ok(())
 }
 
+/// Сменить ТОЛЬКО тип модели (slim/classic) у уже загруженного скина, без
+/// пере-загрузки PNG. drasl принимает частичный PATCH профиля.
+pub async fn set_skin_model(
+    client: &reqwest::Client,
+    base: &str,
+    account: &Account,
+    slim: bool,
+) -> Result<()> {
+    let body = json!({
+        "skinModel": if slim { "slim" } else { "classic" },
+    });
+    let resp = client
+        .patch(format!("{}/players/{}", rest_url(base), account.player_uuid))
+        .bearer_auth(&account.api_token)
+        .json(&body)
+        .send()
+        .await?;
+    if !resp.status().is_success() {
+        return Err(api_error(resp).await);
+    }
+    Ok(())
+}
+
 /// Текущий URL скина игрока (для превью), через drasl REST.
 pub async fn skin_url(
     client: &reqwest::Client,
