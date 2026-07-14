@@ -12,8 +12,8 @@
   },
   "files": [
     {
-      "path": "mods/kingdomrpcore-1.0.0.jar",
-      "url": "https://example.com/kingdomrp/mods/kingdomrpcore-1.0.0.jar",
+      "path": "mods/kingdomrpcore.jar",
+      "url": "https://example.com/kingdomrp/mods/kingdomrpcore.jar",
       "sha256": "1111111111111111111111111111111111111111111111111111111111111111",
       "size": 524288,
       "kind": "mod"
