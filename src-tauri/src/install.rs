@@ -164,11 +164,14 @@ pub async fn sync_manifest(
         let dest = crate::paths::safe_join(install_dir, &entry.path)?;
         progress.set_label(friendly_label(entry.kind, verb));
 
-        // Быстрый путь: size+mtime совпали со слепком → файл на месте и не
-        // менялся, хеш не читаем. Изменённый/удалённый → проваливаемся в ensure_file.
+        // Быстрый путь: size+mtime совпали со слепком И ожидаемый sha256 в слепке =
+        // sha256 из СВЕЖЕГО манифеста → файл на месте, не менялся и версия та же,
+        // хеш не читаем. Иначе (правка/смена версии на сервере) → в ensure_file,
+        // который сверит локальный хеш с манифестом и докачает при расхождении.
         if let Some(st) = &prev {
             if let Some(expected) = st.files.get(&entry.path) {
-                if state::mark(&dest).as_ref() == Some(expected) {
+                let sha_ok = st.sha256.get(&entry.path).is_some_and(|s| s == &entry.sha256);
+                if sha_ok && state::mark(&dest).as_ref() == Some(expected) {
                     progress.add_skipped(entry.size);
                     skipped += 1;
                     continue;
@@ -403,9 +406,10 @@ fn state_up_to_date(install_dir: &Path, manifest: &manifest::Manifest) -> bool {
         let Ok(dest) = crate::paths::safe_join(install_dir, &f.path) else {
             return false;
         };
+        let sha_ok = st.sha256.get(&f.path).is_some_and(|s| s == &f.sha256);
         match (state::mark(&dest), st.files.get(&f.path)) {
-            (Some(m), Some(c)) if &m == c => {}
-            _ => return false, // отсутствует или изменён
+            (Some(m), Some(c)) if sha_ok && &m == c => {}
+            _ => return false, // отсутствует, изменён или другая версия файла
         }
     }
     true
@@ -414,10 +418,12 @@ fn state_up_to_date(install_dir: &Path, manifest: &manifest::Manifest) -> bool {
 /// Записать слепок установки (версия + профиль/injector + size/mtime файлов).
 fn write_state(install_dir: &Path, manifest: &manifest::Manifest) {
     let mut files = std::collections::HashMap::new();
+    let mut sha256 = std::collections::HashMap::new();
     for f in manifest.client_files() {
         if let Ok(dest) = crate::paths::safe_join(install_dir, &f.path) {
             if let Some(mk) = state::mark(&dest) {
                 files.insert(f.path.clone(), mk);
+                sha256.insert(f.path.clone(), f.sha256.clone());
             }
         }
     }
@@ -428,6 +434,7 @@ fn write_state(install_dir: &Path, manifest: &manifest::Manifest) {
             neoforge_profile: manifest.neoforge_profile.clone(),
             authlib_injector: manifest.authlib_injector.clone(),
             files,
+            sha256,
         },
     );
 }

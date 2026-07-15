@@ -34,9 +34,14 @@ pub struct InstallState {
     pub neoforge_profile: Option<String>,
     #[serde(default)]
     pub authlib_injector: Option<String>,
-    /// rel-путь файла (как в манифесте, через `/`) → отпечаток.
+    /// rel-путь файла (как в манифесте, через `/`) → отпечаток (size+mtime).
     #[serde(default)]
     pub files: HashMap<String, FileMark>,
+    /// rel-путь → ожидаемый sha256 (из манифеста, под который качали). Ловит смену
+    /// версии на сервере при совпавших size+mtime локального файла (напр. бамп
+    /// NeoForge 233→235 внутри jar не меняет его размер).
+    #[serde(default)]
+    pub sha256: HashMap<String, String>,
 }
 
 const STATE_FILE: &str = ".krp_state.json";
